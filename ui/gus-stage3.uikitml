@@ -1,0 +1,41 @@
+<!-- Gus's Stage 3 question for Money Moves. Compiled to public/ui/gus-stage3.json. -->
+<style>
+  .panel { display: flex; flex-direction: column; align-items: center; padding: 5; width: 120; background-color: #f3e9d2; border-width: 1.5; border-color: #1F3A5F; border-radius: 5; }
+  .beat { display: flex; flex-direction: column; align-items: center; width: 110; }
+  .eyebrow { font-size: 3; font-weight: bold; color: #8a6118; text-align: center; letter-spacing: 2; }
+  .q-text { font-size: 4.4; font-weight: bold; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .answers { display: flex; flex-direction: column; align-items: center; width: 110; margin-top: 3; }
+  .answer { display: flex; align-items: center; width: 110; padding-top: 3; padding-bottom: 3; padding-left: 4; padding-right: 4; margin-top: 1.5; background-color: #fbf4e3; border-width: 1.2; border-color: #1F3A5F; border-radius: 3; cursor: pointer; }
+  .answer-label { font-size: 3.4; color: #1F3A5F; }
+  .reply-text { font-size: 4; color: #1F3A5F; text-align: center; margin-top: 2; }
+  .meter-change { font-size: 3.4; font-weight: bold; color: #2e7d32; text-align: center; margin-top: 1.5; }
+  .got-it-button { display: flex; align-items: center; justify-content: center; margin-top: 4; padding-top: 3; padding-bottom: 3; padding-left: 9; padding-right: 9; background-color: #c8962a; border-radius: 4; cursor: pointer; }
+  .got-it-label { font-size: 4.4; font-weight: bold; color: #1F3A5F; word-break: keep-all; }
+</style>
+
+<div id="game-panel" class="panel">
+  <div id="beat-q" class="beat">
+    <span id="eyebrow-asks" class="eyebrow">MS. DELIA ASKS</span>
+    <span id="q-text" class="q-text">A planner wants a big cake for a wedding at Maymont this weekend. It is the biggest order the bakery has ever had. What is your call?</span>
+    <div class="answers">
+      <div id="answer-a" class="answer">
+        <span id="answer-a-label" class="answer-label">Say yes, and block out time tomorrow so you can do it right.</span>
+      </div>
+      <div id="answer-b" class="answer">
+        <span id="answer-b-label" class="answer-label">Say yes to every detail they ask for, right now, on top of today's work.</span>
+      </div>
+      <div id="answer-c" class="answer">
+        <span id="answer-c-label" class="answer-label">Say no. It is too big a risk.</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="beat-reply" class="beat">
+    <span id="eyebrow-says" class="eyebrow">MS. DELIA SAYS</span>
+    <span id="reply-text" class="reply-text">...</span>
+    <span id="meter-change" class="meter-change"></span>
+    <div id="got-it-button" class="got-it-button">
+      <span class="got-it-label">Got It</span>
+    </div>
+  </div>
+</div>

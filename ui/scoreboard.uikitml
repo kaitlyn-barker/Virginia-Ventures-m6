@@ -1,0 +1,184 @@
+<style>
+  /* MONEY MOVES SCOREBOARD
+     A clean game scoreboard that lives on the wall of the room. It shows the
+     money total (big and gold inside a dark "ticker" pill so it stays easy to
+     read) and three meter bars below it. DashboardSystem in src/index.ts
+     captures this document and updateScoreboard() writes the money text and
+     each fill's width.
+
+     ACCESSIBILITY: each meter is told apart three ways, so its meaning never
+     rests on color alone:
+       1. a word label that is always shown ("Financial Growth", etc.),
+       2. a chip with its OWN shape (a circle, a square, a wide pill),
+       3. a color chosen to differ in both hue AND brightness from the others.
+
+     Colors below MUST match the palette constants in src/index.ts:
+       PANEL_CREAM #FFF6E5   MONEY_GOLD #FFC53D   INK_DARK #3A2E39
+       BILL_GREEN #54C57A   BILL_EDGE_GREEN #1F7A47
+       CORAL #FF7A59   GROWTH_GREEN #2FA45B   SECURITY_BLUE #1C6FB5
+       SMARTS_VIOLET #BD6BD6
+     The .track width (24) MUST match METER_TRACK_WIDTH in src/index.ts. */
+
+  .board {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 1.6;
+    background-color: #FFF6E5;
+    border-radius: 2.6;
+    border-width: 0.3;
+    border-color: #FF7A59;
+  }
+
+  /* Top: a dark ticker pill holding a little green bill and the big gold money
+     total. The dark pill gives the gold number strong contrast so it reads at a
+     glance, even on a bright wall. */
+  .money-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    background-color: #3A2E39;
+    border-radius: 1.6;
+    padding-top: 0.7;
+    padding-bottom: 0.7;
+    padding-left: 1.2;
+    padding-right: 1.2;
+    margin-bottom: 1.4;
+  }
+  .bill {
+    width: 4.8;
+    height: 2.8;
+    border-radius: 0.6;
+    background-color: #54C57A;
+    border-width: 0.3;
+    border-color: #1F7A47;
+    margin-right: 1.1;
+  }
+  .money {
+    font-size: 4.6;
+    font-weight: bold;
+    color: #FFC53D;
+    text-align: left;
+  }
+
+  /* One meter block: a shaped chip + label + value on top, a track with a
+     colored fill below. */
+  .meter {
+    display: flex;
+    flex-direction: column;
+    margin-top: 0.6;
+    margin-bottom: 0.6;
+  }
+  .meter-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 0.35;
+  }
+  .chip {
+    margin-right: 0.9;
+    border-width: 0.1;
+    border-color: #00000033;
+  }
+  /* Each chip has its own shape AS WELL AS its own color. */
+  .chip-growth {
+    width: 1.8;
+    height: 1.8;
+    border-radius: 0.9; /* a circle */
+    background-color: #2FA45B;
+  }
+  .chip-security {
+    width: 1.8;
+    height: 1.8;
+    border-radius: 0.3; /* a square */
+    background-color: #1C6FB5;
+  }
+  .chip-smarts {
+    width: 2.6;
+    height: 1.5;
+    border-radius: 0.75; /* a wide pill */
+    background-color: #BD6BD6;
+  }
+  .meter-label {
+    flex-grow: 1;
+    font-size: 1.7;
+    font-weight: bold;
+    color: #3A2E39;
+    text-align: left;
+  }
+  .meter-val {
+    width: 5.0;
+    font-size: 1.7;
+    font-weight: bold;
+    color: #3A2E39;
+    text-align: right;
+  }
+
+  /* The track is the empty bar (a neutral pill). The fill is the colored bar
+     on top; its width is set per value by updateScoreboard, so 0 is empty and
+     100 fills the whole track. */
+  .track {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 24;
+    height: 2.4;
+    border-radius: 1.2;
+    background-color: #EAE1D2;
+  }
+  .fill {
+    width: 0;
+    height: 2.4;
+    border-radius: 1.2;
+  }
+  .fill-growth {
+    background-color: #2FA45B;
+  }
+  .fill-security {
+    background-color: #1C6FB5;
+  }
+  .fill-smarts {
+    background-color: #BD6BD6;
+  }
+</style>
+
+<div id="board-root" class="board">
+  <div class="money-row">
+    <div class="bill"></div>
+    <span id="money-total" class="money">$0</span>
+  </div>
+
+  <div class="meter">
+    <div class="meter-head">
+      <div class="chip chip-growth"></div>
+      <span class="meter-label">Financial Growth</span>
+      <span id="val-growth" class="meter-val">0</span>
+    </div>
+    <div class="track">
+      <div id="fill-growth" class="fill fill-growth"></div>
+    </div>
+  </div>
+
+  <div class="meter">
+    <div class="meter-head">
+      <div class="chip chip-security"></div>
+      <span class="meter-label">Financial Security</span>
+      <span id="val-security" class="meter-val">0</span>
+    </div>
+    <div class="track">
+      <div id="fill-security" class="fill fill-security"></div>
+    </div>
+  </div>
+
+  <div class="meter">
+    <div class="meter-head">
+      <div class="chip chip-smarts"></div>
+      <span class="meter-label">Money Smarts</span>
+      <span id="val-smarts" class="meter-val">0</span>
+    </div>
+    <div class="track">
+      <div id="fill-smarts" class="fill fill-smarts"></div>
+    </div>
+  </div>
+</div>

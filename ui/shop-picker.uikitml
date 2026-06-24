@@ -1,0 +1,29 @@
+<!-- Shop picker for Boss for a Day. Compiled to public/ui/shop-picker.json. -->
+<style>
+  .panel { display: flex; flex-direction: column; align-items: center; padding: 5; width: 124; background-color: #f3e9d2; border-width: 1.5; border-color: #5b3a24; border-radius: 5; }
+  .heading { font-size: 7; font-weight: bold; color: #5b3a24; text-align: center; }
+  .instruction { font-size: 3.4; color: #5b3a24; text-align: center; margin-top: 2; }
+  .list { display: flex; flex-direction: column; align-items: center; margin-top: 3; }
+  .card { display: flex; flex-direction: column; align-items: center; width: 112; padding: 4; margin-top: 2; background-color: #fbf4e3; border-width: 1.5; border-color: #5b3a24; border-radius: 3; cursor: pointer; }
+  .card-name { font-size: 5; font-weight: bold; color: #5b3a24; text-align: center; }
+  .card-vibe { font-size: 3; color: #4a4a4a; text-align: center; margin-top: 1.5; }
+</style>
+
+<div class="panel">
+  <span class="heading">Choose Your Shop</span>
+  <span class="instruction">Tap the shop you want to run for the day.</span>
+  <div class="list">
+    <div id="shop-bakery" class="card">
+      <span class="card-name">Sweet Capital Bakery</span>
+      <span class="card-vibe">Bake and sell treats on Cary Street in Richmond.</span>
+    </div>
+    <div id="shop-surf" class="card">
+      <span class="card-name">Atlantic Avenue Surf Co.</span>
+      <span class="card-vibe">Rent boards and gear on the Virginia Beach boardwalk.</span>
+    </div>
+    <div id="shop-repair" class="card">
+      <span class="card-name">Clarendon Device Repair</span>
+      <span class="card-vibe">Fix phones, tablets, and laptops in Arlington.</span>
+    </div>
+  </div>
+</div>
