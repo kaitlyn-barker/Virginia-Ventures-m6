@@ -35,7 +35,7 @@ import {
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
 import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
-import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum, startVillageAmbience, stopVillageAmbience } from "./sfx";
+import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience } from "./sfx";
 
 // ============================================================================
 // ECONOMIC CONSTANTS  (carried over; the stages read these in later prompts)
@@ -793,6 +793,8 @@ const FARM_VALLEY = {
     windmillTower: "#9aa0a6",
     windmillBlade: "#e7e2d4",
     cloud: "#f3f1ea",
+    hill: "#5f9e44",        // rolling green hill (a touch deeper than the lawn, for depth)
+    hillAlt: "#6fab4e",     // a second hill green, so neighbouring swells read apart
   },
   // Blue Ridge silhouette: wide, low, rounded ridges far behind everything.
   // [x, z, width, height, colorKey]
@@ -801,6 +803,16 @@ const FARM_VALLEY = {
     [2.6, -8.9, 7.6, 2.7, "ridgeFar"],
     [-1.0, -7.6, 6.2, 1.9, "ridgeNear"],
     [3.4, -7.4, 5.6, 1.7, "ridgeNear"],
+  ] as [number, number, number, number, string][],
+  // ROLLING GREEN HILLS rising between the valley floor and the Blue Ridge: wide,
+  // low, rounded green swells (the same flattened-sphere trick as the ridges). ALL
+  // sit well behind the build (z <= BACK_Z), so they never enter the central
+  // corridor in front of the panels / build / field. [x, z, width, height, colorKey]
+  HILLS: [
+    [-0.2, -8.0, 7.4, 1.3, "hillAlt"],
+    [0.2, -6.6, 6.4, 0.95, "hill"],
+    [-3.5, -5.3, 4.4, 0.78, "hillAlt"],
+    [3.6, -5.5, 4.6, 0.82, "hill"],
   ] as [number, number, number, number, string][],
   // distant cropland stripes (low wide slabs that gently sway): [x, z, w, d, colorKey].
   FIELDS: [
@@ -2215,9 +2227,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       // Start the stop's quiet ambience now the student is inside. Entering the
       // stop was itself an interaction (the landmark press), so the AudioContext is
       // already allowed to play: the Tech Office gets its server-room hum, the
-      // Tourism Hub gets its outdoor village murmur + birdsong.
+      // Tourism Hub gets its outdoor village murmur + birdsong, and the Modern Farm
+      // gets a gentle rural breeze + birdsong.
       if (stop.id === "tech") startHum();
       else if (stop.id === "tourism") startVillageAmbience();
+      else if (stop.id === "farm") startFarmAmbience();
       startDecisionPack(stop, pack);
       return;
     }
@@ -2243,6 +2257,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     hideAllStopScenes();   // and the calm per-stop backdrop
     stopHum();             // fade out the Tech Office room ambience as we leave
     stopVillageAmbience(); // fade out the Tourism village ambience as we leave
+    stopFarmAmbience();    // fade out the Modern Farm rural ambience as we leave
   }
 
   // ---- THE VISIT: enter on a landmark select, finish on the button ----
@@ -2686,6 +2701,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       ridge.scale.set(r[2] / 2, r[3], 1.6);
       ridge.position.set(r[0], V.GROUND_Y - r[3] * 0.45, r[1]);
       g.add(ridge);
+    }
+
+    // rolling green hills between the valley floor and the Blue Ridge: the same
+    // flattened-sphere swells, greener, lower, and a touch nearer, so the ground
+    // reads as gently rolling rather than flat. All sit behind the build.
+    for (const h of V.HILLS) {
+      const hill = meshSphere(1, (C as any)[h[4]]);
+      hill.scale.set(h[2] / 2, h[3], 2.2);
+      hill.position.set(h[0], V.GROUND_Y - h[3] * 0.55, h[1]);
+      g.add(hill);
     }
 
     // distant cropland stripes: low wide slabs that drift a touch in the wind.

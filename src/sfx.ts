@@ -263,3 +263,100 @@ export function stopVillageAmbience() {
   }
   villageHandle = null;
 }
+
+// ----------------------------------------------------------------------------
+// FARM AMBIENCE  —  the rural counterpart to the server-room hum and the village
+// murmur: a soft, gently GUSTING BREEZE (a slow swell) under a faint warm pad, plus
+// the occasional light bird chirp. Same approach as startHum/startVillageAmbience:
+// pure WebAudio drones that loop until stopFarmAmbience(), so no rAF; the only timer
+// is a slow setInterval that sprinkles in birdsong (reusing the village's birdChirp).
+// Soft and short on purpose (kids in a headset), with a gentle fade in/out so it never
+// pops. The caller starts it on the student's first action in the stop (entering it),
+// by which point the AudioContext is unlocked.
+// ----------------------------------------------------------------------------
+let farmHandle: {
+  gain: GainNode;
+  sources: AudioScheduledSourceNode[];
+  birds: ReturnType<typeof setInterval>;
+} | null = null;
+const FARM_LEVEL = 0.05; // master gain of the whole ambience (very soft)
+
+export function startFarmAmbience() {
+  const ctx = getCtx();
+  if (!ctx || farmHandle) return; // already running, or no audio
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(FARM_LEVEL, ctx.currentTime + 1.2); // ease in
+  master.connect(ctx.destination);
+
+  const sources: AudioScheduledSourceNode[] = [];
+
+  // A light breeze: looped white noise through a low-pass, kept faint and airy
+  // (a higher cutoff than the indoor "fan air", so it reads as open-air wind).
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const breeze = ctx.createBufferSource();
+  breeze.buffer = buffer;
+  breeze.loop = true;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 800;
+  const bg = ctx.createGain();
+  bg.gain.value = 0.4;
+  breeze.connect(lp).connect(bg).connect(master);
+  breeze.start();
+  sources.push(breeze);
+
+  // a very slow swell on the breeze (an LFO on its gain), so the wind gently gusts
+  // and falls. Audio-rate scheduling, not rAF.
+  const lfo = ctx.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.value = 0.07; // very slow gusting
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.2;
+  lfo.connect(lfoGain).connect(bg.gain);
+  lfo.start();
+  sources.push(lfo);
+
+  // a faint warm pad underneath, so the open air feels full, not hissy.
+  const pad = ctx.createOscillator();
+  pad.type = "sine";
+  pad.frequency.value = 98; // G2, low and soft
+  const pg = ctx.createGain();
+  pg.gain.value = 0.06;
+  pad.connect(pg).connect(master);
+  pad.start();
+  sources.push(pad);
+
+  // Light birdsong: an occasional soft chirp on a slow setInterval (randomized so
+  // the spacing varies). Reuses the same birdChirp() as the village. Cleared on stop.
+  const birds = setInterval(function () {
+    if (Math.random() < 0.45) birdChirp();
+  }, 4000);
+
+  farmHandle = { gain: master, sources, birds };
+}
+
+export function stopFarmAmbience() {
+  const ctx = getCtx();
+  if (!farmHandle || !ctx) return;
+  const { gain, sources, birds } = farmHandle;
+  clearInterval(birds);
+  const t = ctx.currentTime;
+  try {
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); // ease out
+  } catch {
+    // ignore: context may be closing
+  }
+  for (const s of sources) {
+    try {
+      s.stop(t + 0.7);
+    } catch {
+      // already stopped
+    }
+  }
+  farmHandle = null;
+}
