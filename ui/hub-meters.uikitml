@@ -1,0 +1,44 @@
+<!-- Module 6 hub meters. A fixed card at the map showing the three running -->
+<!-- totals as filling bars. Same three colors as ui/report.uikitml, so the hub -->
+<!-- and the end report match. Bars are driven from m6Totals in src/index.ts. -->
+<style>
+  .panel { display: flex; flex-direction: column; align-items: stretch; padding: 4; width: 76; background-color: #f3e9d2; border-width: 1.5; border-color: #1F3A5F; border-radius: 4; }
+  .eyebrow { font-size: 3.6; font-weight: bold; color: #8a6118; text-align: center; letter-spacing: 1; margin-bottom: 1; }
+  .meter { display: flex; flex-direction: column; margin-top: 2.6; }
+  .meterhead { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 0.8; }
+  .meterlabel { font-size: 3; font-weight: bold; color: #1F3A5F; }
+  .meterval { font-size: 3; font-weight: bold; color: #1F3A5F; }
+  .track { width: 68; height: 3; background-color: #e2dccb; border-radius: 1.5; }
+  .fill { height: 3; border-radius: 1.5; width: 0; }
+  .fill-economic { background-color: #d76f4f; }
+  .fill-innovation { background-color: #5fae4a; }
+  .fill-problem { background-color: #4a8fd6; }
+</style>
+
+<div id="hub-meters-panel" class="panel">
+  <span class="eyebrow">YOUR PROGRESS</span>
+
+  <div class="meter">
+    <div class="meterhead">
+      <span class="meterlabel">Economic Impact</span>
+      <span id="hub-val-economic" class="meterval">0</span>
+    </div>
+    <div class="track"><div id="hub-fill-economic" class="fill fill-economic"></div></div>
+  </div>
+
+  <div class="meter">
+    <div class="meterhead">
+      <span class="meterlabel">Innovation Thinking</span>
+      <span id="hub-val-innovation" class="meterval">0</span>
+    </div>
+    <div class="track"><div id="hub-fill-innovation" class="fill fill-innovation"></div></div>
+  </div>
+
+  <div class="meter">
+    <div class="meterhead">
+      <span class="meterlabel">Problem Solving</span>
+      <span id="hub-val-problem" class="meterval">0</span>
+    </div>
+    <div class="track"><div id="hub-fill-problem" class="fill fill-problem"></div></div>
+  </div>
+</div>

@@ -17,6 +17,7 @@ import {
   LocomotionEnvironment,
   EnvironmentType,
   VisibilityState,
+  Hovered,
   Pressed,
   PanelUI,
   PanelDocument,
@@ -25,10 +26,14 @@ import {
   Box3,
   Group,
   Color,
+  Mesh,
+  PlaneGeometry,
+  MeshBasicMaterial,
+  DoubleSide,
 } from "@iwsdk/core";
 
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
-import { meshBox, meshCyl, meshSphere, meshCone, makeTextPanel } from "./environment";
+import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
 import { sfxStage, sfxClick, sfxCoin, sfxFanfare } from "./sfx";
 
@@ -67,17 +72,23 @@ const HUB = {
   PED_TOP_Y: 0.95,       // height of each pedestal top, where the landmark sits
   PED_R: 0.26,           // pedestal radius
   MODEL_SCALE: 2.4,      // enlarge each diorama landmark so the row fills the view
-  TITLE_Y: 1.95,         // height of each landmark's floating title panel
-  TITLE_W: 0.85,         // width of a title panel, in metres
+  TITLE_Y: 1.86,         // title card sits just ABOVE its landmark, not high in the sky
+  TITLE_W: 0.92,         // width of a compact title card, in metres
   FOX_GAP: 0.95,         // how far left of the first station Foreman Fox stands
-  WELCOME_Y: 2.3,        // welcome panel rides high above Fox, clear of the titles
-  WELCOME_W: 1.0,        // width of the welcome panel, in metres
+  WELCOME_Y: 1.85,       // Fox's speech bubble floats by his head (its tail points down to him)
+  WELCOME_W: 0.8,        // width of the speech bubble, in metres (smaller now each place has a title)
+  WELCOME_DX: -0.05,     // small sideways nudge of the bubble off Fox's head
   STAGE_TOP_Y: 0.0,      // top of the stage platform (flush with the standing floor)
   STAGE_THICK: 0.14,     // stage slab thickness
   STAGE_FRONT_Z: 3.7,    // stage near edge (just in front of the row)
   STAGE_BACK_Z: 7.7,     // stage far edge (just behind the standing student)
   STAGE_MARGIN: 0.5,     // how far the stage reaches past Fox and the last station
   BADGE_Y: 0.62,         // height of the gold "visited" check on the pedestal front
+  GROUND_PAD_W: 1.4,     // how far the warm ground reaches past the stage, left+right total
+  GROUND_PAD_D: 0.9,     // how far the warm ground reaches past the stage, front+back total
+  GROUND_THICK: 0.08,    // ground slab thickness
+  FOX_PODIUM_H: 0.12,    // height of the little podium Fox stands on (head of the lineup)
+  FOX_PODIUM_R: 0.5,     // radius of Fox's podium
 };
 
 // How each landmark glows and bobs, so the lineup feels alive. One setInterval
@@ -91,6 +102,20 @@ const LANDMARK = {
   PULSE_MAX: 0.75,   // glow high point of that inviting pulse
   PULSE_SPEED: 2.2,  // how quickly an unvisited station breathes its glow
   DONE_GLOW: 0.16,   // calm steady glow once a stop is finished (pulse off)
+  // A soft "come here" glow pool at the base of each UNVISITED landmark, in that
+  // stop's color. It breathes with the same pulse and vanishes once the stop is
+  // done (the gold check takes over). This is the clearest "come explore" cue.
+  PAD_R: 1.5,        // glow-pool radius as a multiple of the pedestal radius
+  PAD_GLOW_MIN: 0.55, // emissive low point of the inviting pool
+  PAD_GLOW_MAX: 1.3,  // emissive high point of the inviting pool
+  PAD_OP_MIN: 0.32,  // opacity low point (translucent, so it reads as glow not plate)
+  PAD_OP_MAX: 0.68,  // opacity high point
+  PAD_SCALE_AMP: 0.18, // how much the pool swells and shrinks as it breathes
+  // Point-at highlight: when the student aims at a landmark it brightens and grows
+  // a touch, so the place the press will enter is unmistakable. Applied over the
+  // pulse/done look in the same loop, so there is one owner of the glow.
+  HOVER_GLOW: 1.0,    // emissive while pointed at (well above the pulse high point)
+  HOVER_SCALE: 1.08,  // gentle grow while pointed at
 };
 
 // The warm palette for the stage, the pedestals, and the gold visited badge.
@@ -101,6 +126,7 @@ const HUB_COLOR = {
   pedestalCap: "#d8c8a4", // lighter cap ring on each pedestal
   badge: "#f4c20d",      // gold visited badge disk
   badgeCheck: "#ffffff", // white check stroke on the badge
+  ground: "#d3c8ad",     // calm warm-neutral ground under the row and Fox
 };
 
 // The four stops, laid out left to right in THIS order across the row. region
@@ -113,15 +139,17 @@ const STOPS = [
     name: "Tech Office",
     title: "Tech Office, Northern Virginia",
     region: "Northern Virginia",
+    tagline: "Where the internet lives",
     landmark: "Data Center",
     color: "#3f9fd0",   // tech blue
-    done: true,         // TEMP (step 6): preview the visited badge — reset to false
+    done: false,        // earned by actually finishing the stop
   },
   {
     id: "port",
     name: "Port of Virginia",
     title: "Port of Virginia, Norfolk",
     region: "Norfolk",
+    tagline: "Goods from around the world",
     landmark: "Cargo Ship",
     color: "#e06a4f",   // port red-orange
     done: false,
@@ -131,20 +159,206 @@ const STOPS = [
     name: "Tourism Hub",
     title: "Tourism Hub, Colonial Williamsburg",
     region: "Williamsburg",
+    tagline: "Where history comes alive",
     landmark: "Capitol Building",
     color: "#caa24a",   // colonial gold
-    done: true,         // TEMP (step 6): preview the visited badge — reset to false
+    done: false,        // earned by actually finishing the stop
   },
   {
     id: "farm",
     name: "Modern Farm",
     title: "Modern Farm, Shenandoah Valley",
     region: "Shenandoah Valley",
+    tagline: "Where farming goes high-tech",
     landmark: "Red Barn",
     color: "#5fae4a",   // farm green
     done: false,
   },
 ];
+
+// ============================================================================
+// MODULE 6 — DECISION PACKS  (the shared grammar the three "lean" stops fill)
+// A decision pack is pure DATA the reusable runner plays inside the stop shell.
+// Keep it clean and general: Tourism and Farm fill this SAME shape later (the Port
+// is the one custom mini game, so it has no pack). A pack is:
+//   setup:     one plain-language line that frames the whole stop (Fox's intro)
+//   decisions: the choices the student makes in order; each decision has a
+//     question and exactly three options; each option has
+//       label:   the words on the pointable card
+//       effects: how this pick moves the three meters, any of which may be
+//                positive, negative, or zero —
+//                  ei = Economic Impact, it = Innovation Thinking, ps = Problem Solving
+//       note:    one short sentence shown after the pick, explaining the result
+// No pick is a wrong answer that fails the student: weaker picks simply add less
+// or take a little. Every amount is a starting value to tune later, so they all
+// live here and nothing is hardcoded in the runner.
+// ============================================================================
+type MeterEffects = { ei: number; it: number; ps: number };
+// A stop's build reacts to each pick. A strong choice makes the new piece THRIVE
+// (steady bright glow, data flowing along its cables); a weak one makes it STRUGGLE
+// (dim, gently flickering, stalled flow); an in-between one runs NEUTRAL (a quiet,
+// steady hum). The staging reads this; the meter math (effects) is unchanged.
+type StageReaction = "thrive" | "struggle" | "neutral";
+type DecisionOption = { label: string; effects: MeterEffects; note: string; reaction?: StageReaction };
+type Decision = { question: string; options: DecisionOption[] };
+type DecisionPack = { setup: string; decisions: Decision[] };
+
+const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
+  tech: {
+    setup:
+      "A company wants to build a new data center, a giant building full of computers that helps run the internet. You make three choices to set it up.",
+    decisions: [
+      {
+        question: "Where should we build it?",
+        options: [
+          {
+            label: "Out in the cheap countryside.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Cheap land, but it is far from the internet lines and power, so it runs slow.",
+          },
+          {
+            label: "In Northern Virginia, near the internet lines and lots of power.",
+            effects: { ei: 8, it: 3, ps: 8 },
+            reaction: "thrive",
+            note: "Great spot. The internet lines and plenty of power are right here, so it runs fast.",
+          },
+          {
+            label: "Downtown, with no spare power.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "No room or spare power downtown, so it cannot grow.",
+          },
+        ],
+      },
+      {
+        question: "How will you power it?",
+        options: [
+          {
+            label: "Use only the power already there.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Not enough power on its own. It could overload.",
+          },
+          {
+            label: "Build a strong, reliable supply and add solar panels.",
+            effects: { ei: 0, it: 8, ps: 8 },
+            reaction: "thrive",
+            note: "Steady power, and the solar panels are a smart, modern touch.",
+          },
+          {
+            label: "Buy the cheapest power, even if it cuts out.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "It saves money, but the power cuts out and the center stops.",
+          },
+        ],
+      },
+      {
+        question: "How will you run it once it is open?",
+        options: [
+          {
+            label: "Hire local workers and connect to the fast internet lines.",
+            effects: { ei: 8, it: 0, ps: 8 },
+            reaction: "thrive",
+            note: "New jobs for local workers, and the fast connection keeps it running.",
+          },
+          {
+            label: "Run it with as few people as possible.",
+            effects: { ei: 3, it: -3, ps: 0 },
+            reaction: "neutral",
+            note: "It saves money, but it creates very few jobs.",
+          },
+          {
+            label: "Use a slow, cheap connection.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "The slow connection cannot keep up with all the computers.",
+          },
+        ],
+      },
+    ],
+  },
+};
+
+// ============================================================================
+// STOP STAGING — TUNING  (how the build reacts to each pick; shared by all stops)
+// One labeled block for every blink, glow, and flow rate, so the comfort rules
+// (slow, gentle, never strobing) are tuned in ONE place. The generic staging
+// engine and the Tech Office build read these; the meter math does not.
+// ============================================================================
+const STAGING = {
+  TICK_MS: 33,            // every staging loop runs on setInterval (rAF pauses in headset)
+  APPEAR_MS: 520,         // a freshly added piece eases up into place over this long (no pop)
+  APPEAR_RISE: 0.14,      // how far (m) it rises as it settles in
+  // THRIVE: a calm, bright, steady glow with a barely-there breath so it feels alive.
+  THRIVE_GLOW: 0.95,
+  THRIVE_PULSE_AMP: 0.07, // tiny breathing on top of the steady glow
+  THRIVE_PULSE_HZ: 0.28,  // slow (cycles per second)
+  // NEUTRAL: "runs quietly" — a plain steady mid glow, no motion.
+  NEUTRAL_GLOW: 0.45,
+  // STRUGGLE: dim, with a slow, uneven flicker that never strobes.
+  STRUGGLE_GLOW_MIN: 0.07,
+  STRUGGLE_GLOW_MAX: 0.34,
+  FLICKER_HZ_A: 0.5,      // primary slow wobble (cycles per second)
+  FLICKER_HZ_B: 0.27,     // secondary wobble, so the dimming feels uneven not metronomic
+  // Data flowing along the cables: small lights that travel end to end and loop.
+  FLOW_DOTS: 4,
+  FLOW_DOT_R: 0.02,
+  FLOW_SPEED_THRIVE: 0.5,    // cable-lengths per second (smooth, healthy)
+  FLOW_SPEED_NEUTRAL: 0.1,   // a slow, quiet trickle
+  FLOW_SPEED_STRUGGLE: 0.12, // a crawl that stalls on the flicker's low points
+  FLOW_GLOW_THRIVE: 1.0,
+  FLOW_GLOW_NEUTRAL: 0.4,
+  FLOW_GLOW_STRUGGLE: 0.28,
+  WORKER_BOB_HZ: 0.6,        // tiny idle bob for workers when the center is thriving
+  WORKER_BOB_AMP: 0.02,
+};
+
+// ============================================================================
+// TECH OFFICE — BUILD LAYOUT  (the data center that assembles on the lot)
+// Where each piece sits on the construction lot in front of the student, plus
+// the palette. Positions are world coords (the staging group sits at the scene
+// origin). The lot is centered ahead and a little below eye line, beyond the
+// decision cards, so the student watches it come together as they choose.
+// ============================================================================
+const TECH_BUILD = {
+  FORWARD: 1.8,           // shift the whole build toward the student so it reads big and clear
+  LOT: [0, 0.64, -0.85] as [number, number, number], // lot/table-top center (its own local frame)
+  LOT_W: 2.9,
+  LOT_D: 2.5,
+  LOT_THICK: 0.12,        // the build sits on a table at this height so it clears the floating UI
+  BLD_POS: [-0.35, 0, -0.95] as [number, number, number], // building footprint center
+  BLD_W: 0.95,
+  BLD_H: 0.78,
+  BLD_D: 1.0,
+  TRANSFORMER_POS: [0.6, 0, -0.7] as [number, number, number],
+  SOLAR_POS: [1.05, 0, -1.25] as [number, number, number],
+  NODE_POS: [-1.3, 0, -0.85] as [number, number, number], // the internet node (a little cloud on a post)
+  COLOR: {
+    pad: "#3a4b5c",
+    wall: "#cdd7df",
+    roof: "#8b97a3",
+    window: "#46e0f0",
+    transformer: "#6b7682",
+    bushing: "#9aa6b0",
+    indicator: "#ffce54",
+    pole: "#54606b",
+    line: "#2c3a47",
+    solar: "#1b3a6b",
+    solarGleam: "#6fd6ff",
+    cloud: "#e3eaf0",
+    nodeGlow: "#7fe6ff",
+    vest: "#f0883c",
+    helmet: "#ffd23f",
+    grass: "#5fae4a",
+    dirt: "#b9a77e",
+    concrete: "#9aa3ab",
+    tree: "#6f5436",
+    leaf: "#4f9a43",
+    flow: "#8af3ff",
+  },
+};
 
 // ============================================================================
 // HOUSE PALETTE  (the Market Harvest colonial parchment look)
@@ -1039,6 +1253,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   stage.position.set(stageCx, HUB.STAGE_TOP_Y - HUB.STAGE_THICK / 2, stageCz);
   hubGroup.add(stage);
 
+  // --- The ground: a calm, warm-neutral surface just under the stage so nothing
+  // floats over open sky. Sized to the scene (a little past the stage on every
+  // side), NOT the old large checker floor. The sky overhead is untouched. ---
+  const groundW = stageW + HUB.GROUND_PAD_W;
+  const groundD = stageD + HUB.GROUND_PAD_D;
+  const groundTopY = HUB.STAGE_TOP_Y - HUB.STAGE_THICK - 0.05; // just below the stage rim
+  const groundSlab = meshBox(groundW, HUB.GROUND_THICK, groundD, HUB_COLOR.ground);
+  groundSlab.position.set(stageCx, groundTopY - HUB.GROUND_THICK / 2, stageCz);
+  hubGroup.add(groundSlab);
+
   // --- The host: a friendly low-poly Foreman Fox at the LEFT end of the row,
   // facing the student. A primitive stand-in until the real model lands. ---
   function buildHubFox(): Group {
@@ -1070,18 +1294,29 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const brim = meshCyl(0.21, 0.21, 0.03, HAT); brim.position.y = 1.19; fox.add(brim);
     return fox;
   }
+  // --- Fox's podium: a small two-tier stand that lifts him a little, so he
+  // reads as stationed at the head of the lineup, not standing loose. Same warm
+  // palette as the pedestals. ---
+  const podium = meshCyl(HUB.FOX_PODIUM_R, HUB.FOX_PODIUM_R * 1.06, HUB.FOX_PODIUM_H, HUB_COLOR.pedestal);
+  podium.position.set(foxX, HUB.STAGE_TOP_Y + HUB.FOX_PODIUM_H / 2, HUB.ROW_Z);
+  hubGroup.add(podium);
+  const podiumCap = meshCyl(HUB.FOX_PODIUM_R * 1.05, HUB.FOX_PODIUM_R * 1.05, 0.03, HUB_COLOR.pedestalCap);
+  podiumCap.position.set(foxX, HUB.STAGE_TOP_Y + HUB.FOX_PODIUM_H - 0.015, HUB.ROW_Z);
+  hubGroup.add(podiumCap);
+
   const fox = buildHubFox();
-  fox.position.set(foxX, HUB.STAGE_TOP_Y, HUB.ROW_Z); // left end, in line with the row
+  fox.position.set(foxX, HUB.STAGE_TOP_Y + HUB.FOX_PODIUM_H, HUB.ROW_Z); // standing on his podium
   hubGroup.add(fox); // built facing +z, toward the student
 
-  // --- The welcome panel: smaller now, floating above Fox so each landmark's
-  // own title can carry the lineup. Keeps Fox's welcome line. ---
-  const welcomeSign = makeTextPanel(
+  // --- Fox's welcome, now a speech bubble by his head (its tail points down to
+  // him), so it reads as Fox greeting you rather than a separate sign. Smaller
+  // now that each place carries its own title. Same welcome words. ---
+  const welcomeSign = makeSpeechBubble(
     "Welcome, Explorer!",
     "Virginia's economy looks very different today than it used to. Four places on this map show you why. Point at any one to visit it first.",
     HUB.WELCOME_W,
   );
-  welcomeSign.position.set(foxX, HUB.WELCOME_Y, HUB.ROW_Z);
+  welcomeSign.position.set(foxX + HUB.WELCOME_DX, HUB.WELCOME_Y, HUB.ROW_Z);
   hubGroup.add(welcomeSign); // PlaneGeometry faces +z, so it faces the student
 
   // --- One small low-poly landmark per stop, each on its own pedestal ---
@@ -1210,7 +1445,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // Build the row, left to right in STOPS order: a pedestal, the enlarged
   // landmark on top, a floating title above, and a (hidden until done) badge.
   const hubLandmarks: {
-    obj: Group; baseY: number; stop: any; glowMats: any[]; badge: Group;
+    obj: Group; baseY: number; stop: any; glowMats: any[]; badge: Group; pad: any;
+    entity: any; wasPressed: boolean;
   }[] = [];
   for (let i = 0; i < STOPS.length; i++) {
     const stop = STOPS[i];
@@ -1227,16 +1463,46 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     cap.position.set(px, HUB.PED_TOP_Y - 0.015, HUB.ROW_Z);
     hubGroup.add(cap);
 
+    // A soft "come here" glow pool on the pedestal top, in the stop's color. The
+    // bob loop breathes it while the stop is unvisited and hides it once done, so
+    // an unvisited place clearly reads as "come explore." Translucent so it glows.
+    const pad = meshCyl(HUB.PED_R * LANDMARK.PAD_R, HUB.PED_R * LANDMARK.PAD_R, 0.02, stop.color, 24);
+    pad.position.set(px, HUB.PED_TOP_Y + 0.012, HUB.ROW_Z);
+    (pad.material as any).emissive = new Color(stop.color);
+    (pad.material as any).transparent = true;
+    hubGroup.add(pad);
+
     // The landmark, enlarged so the row fills the view, resting on the pedestal.
     const landmark = build();
     landmark.scale.setScalar(HUB.MODEL_SCALE);
     landmark.position.set(px, HUB.PED_TOP_Y, HUB.ROW_Z);
     const glowMats: any[] = [];
     softGlow(landmark, LANDMARK.GLOW, glowMats);
-    hubGroup.add(landmark);
 
-    // The floating title: big name, smaller region line, facing the student.
-    const title = makeTextPanel(stop.name, stop.region, HUB.TITLE_W);
+    // A see-through hit box so a small landmark (the thin tech tower especially) is
+    // still easy to point at: invisible, but it still raycasts, so it just enlarges
+    // the target. Added after softGlow so it is not tinted, and it rides inside the
+    // landmark group so it scales and bobs along with it.
+    const hit = meshBox(0.3, 0.46, 0.3, "#ffffff");
+    hit.castShadow = false;
+    hit.receiveShadow = false;
+    const hitMat = hit.material as any;
+    hitMat.transparent = true;
+    hitMat.opacity = 0;
+    hitMat.depthWrite = false;
+    hit.position.set(0, 0.22, 0);
+    landmark.add(hit);
+
+    // Make the whole landmark a ray target, the SAME pointing mechanism the panels
+    // use (Interactable). createTransformEntity reparents it to the scene root, but
+    // hubGroup sits at the origin so the coordinates above place it identically. We
+    // keep the entity so the loops can read Hovered / Pressed, and so the hub
+    // hide/show can toggle it alongside the rest of the lineup.
+    const landmarkEntity = world.createTransformEntity(landmark).addComponent(Interactable);
+
+    // The floating title card: place name, region line, and flavor tagline. It is
+    // compact and sits just above this landmark, aligned with the other cards.
+    const title = makeTitleCard(stop.name, stop.region, stop.tagline, HUB.TITLE_W);
     title.position.set(px, HUB.TITLE_Y, HUB.ROW_Z);
     hubGroup.add(title);
 
@@ -1246,11 +1512,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     badge.visible = stop.done;
     hubGroup.add(badge);
 
-    hubLandmarks.push({ obj: landmark, baseY: HUB.PED_TOP_Y, stop, glowMats, badge });
+    hubLandmarks.push({ obj: landmark, baseY: HUB.PED_TOP_Y, stop, glowMats, badge, pad, entity: landmarkEntity, wasPressed: false });
   }
 
-  // One gentle loop drives both the bob and the visited state, so flipping a
-  // stop's done flag later just works. setInterval, not rAF (rAF pauses in VR).
+  // One gentle loop drives the bob, the visited state, AND the point-at highlight,
+  // so flipping a stop's done flag (or pointing at it) later just works. setInterval,
+  // not rAF (rAF pauses in the headset).
   let bobT = 0;
   setInterval(function () {
     bobT += 0.033;
@@ -1259,19 +1526,1014 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       // Bob: all four drift up and down, phase-staggered so they feel alive.
       lm.obj.position.y =
         lm.baseY + Math.sin(bobT * LANDMARK.BOB_SPEED + i * LANDMARK.BOB_STAGGER) * LANDMARK.BOB_AMP;
+
+      // Is the student pointing at this landmark right now? Hovered while the ray
+      // rests on it, Pressed the instant they select. Drives the "this is the
+      // target" highlight, layered over whatever the pulse/done look is doing.
+      const pointed =
+        lm.entity.hasComponent(Hovered) || lm.entity.hasComponent(Pressed);
+
+      let glow: number;
       if (lm.stop.done) {
-        // Finished: pulse off, a calm steady glow, the gold check showing.
-        for (const m of lm.glowMats) m.emissiveIntensity = LANDMARK.DONE_GLOW;
+        // Finished: pulse off, a calm steady glow, the gold check showing, the
+        // inviting glow pool gone (the check now says "done", not "come here").
+        glow = LANDMARK.DONE_GLOW;
         lm.badge.visible = true;
+        lm.pad.visible = false;
       } else {
-        // Unvisited: breathe the glow up and down to invite a visit, no badge.
+        // Unvisited: breathe the landmark glow AND the floor pool to invite a
+        // visit, no badge. The pool swells, brightens, and fades as it breathes;
+        // pointing at it snaps the pool to its brightest so the cue is obvious.
         const t = 0.5 + 0.5 * Math.sin(bobT * LANDMARK.PULSE_SPEED + i * LANDMARK.BOB_STAGGER);
-        const e = LANDMARK.PULSE_MIN + (LANDMARK.PULSE_MAX - LANDMARK.PULSE_MIN) * t;
-        for (const m of lm.glowMats) m.emissiveIntensity = e;
+        glow = LANDMARK.PULSE_MIN + (LANDMARK.PULSE_MAX - LANDMARK.PULSE_MIN) * t;
         lm.badge.visible = false;
+        lm.pad.visible = true;
+        const pt = pointed ? 1 : t;
+        const pm = lm.pad.material;
+        pm.emissiveIntensity = LANDMARK.PAD_GLOW_MIN + (LANDMARK.PAD_GLOW_MAX - LANDMARK.PAD_GLOW_MIN) * pt;
+        pm.opacity = LANDMARK.PAD_OP_MIN + (LANDMARK.PAD_OP_MAX - LANDMARK.PAD_OP_MIN) * pt;
+        const s = 1 + LANDMARK.PAD_SCALE_AMP * pt;
+        lm.pad.scale.set(s, 1, s);
       }
+
+      // The point-at highlight itself: brighten the glow and grow the landmark a
+      // touch, in either state, so the student always knows which place a press
+      // will enter. One owner of glow + scale keeps it from fighting the pulse.
+      if (pointed) glow = LANDMARK.HOVER_GLOW;
+      for (const m of lm.glowMats) m.emissiveIntensity = glow;
+      lm.obj.scale.setScalar(HUB.MODEL_SCALE * (pointed ? LANDMARK.HOVER_SCALE : 1));
     }
   }, 33);
+
+  // ======================================================================
+  // MODULE 6 VISIT LOOP  —  point at a landmark, travel into that stop, run its
+  // (placeholder) challenge, finish, and travel back to the map. This is the
+  // reusable SHELL; the real per-stop challenges drop into showStop() later.
+  // Everything reads the VISIT tunables; nothing is hardcoded inline. Every loop
+  // is setInterval (rAF pauses in the headset).
+  // ======================================================================
+  const VISIT = {
+    // The travel fade: a calm, slow dip to a solid color and back, never a flash.
+    FADE_COLOR: "#0e1c2b",   // calm deep navy to dip through (not pure black)
+    FADE_MS: 700,            // time to fade fully OUT, and again to fade fully IN
+    FADE_HOLD_MS: 140,       // a short beat held at full cover while the world swaps
+    FADE_DIST: 0.4,          // how far in front of the eye the cover sits (metres)
+    FADE_SIZE: 6,            // cover size; oversized so it always fills the view
+    TICK_MS: 33,             // loop rate for the fade and the point-to-select watch
+    // The placeholder INSIDE a stop: a title/description panel and one big button.
+    PANEL_POS: [0, 1.72, 3.3] as [number, number, number], // ahead of the spawn, kid eye height
+    PANEL_W: 2.1,            // description panel width (metres)
+    BTN_POS: [0, 0.92, 3.45] as [number, number, number],  // the Finish button, lower and a touch nearer
+    BTN_W: 1.3,              // button width (metres)
+    BTN_H: 0.36,             // button height (metres)
+    BTN_HOVER_SCALE: 1.06,   // gentle grow while pointed at
+    BTN_PRESS_SCALE: 0.95,   // quick squish on press
+    // PLACEHOLDER award handed to completeStop on Finish. Real per-challenge
+    // scoring (the three meters in CLAUDE.md) replaces this in a later prompt.
+    PLACEHOLDER_AWARD: { economic: 20, innovation: 20, problem: 20 },
+  };
+
+  // The one gate that decides what a point/press does: "hub" (the map reacts),
+  // "fading" (mid-travel, nothing reacts), or "stop" (only Finish reacts).
+  let currentView = "hub";
+  let activeStopId: string | null = null;
+  // The REAL per-stop award handed to completeStop on Finish. A decision-pack stop
+  // (the runner) sets this to the student's true tally; a placeholder stop leaves
+  // it null and falls back to VISIT.PLACEHOLDER_AWARD. Reset on every enterStop.
+  let pendingAward: { economic: number; innovation: number; problem: number } | null = null;
+
+  // ---- SCORING SPINE ----  Each finished stop stores ONE award, keyed by id; the
+  // running totals are the SUM of those awards. Finishing a stop again just
+  // overwrites its award, so a re-visit never double counts (prompt step 6). The
+  // visible meters panel and the report card arrive in the next prompt; for now we
+  // keep the numbers and log them.
+  const M6_AWARDS: Record<string, { economic: number; innovation: number; problem: number }> = {};
+  const m6Totals = { economic: 0, innovation: 0, problem: 0 };
+  function recomputeM6Totals() {
+    let ec = 0, inn = 0, pr = 0;
+    for (const id in M6_AWARDS) {
+      ec += M6_AWARDS[id].economic;
+      inn += M6_AWARDS[id].innovation;
+      pr += M6_AWARDS[id].problem;
+    }
+    // Meters live 0..100; clamp so placeholder sums never run past the top.
+    m6Totals.economic = Math.max(0, Math.min(100, ec));
+    m6Totals.innovation = Math.max(0, Math.min(100, inn));
+    m6Totals.problem = Math.max(0, Math.min(100, pr));
+  }
+  function completeStop(stopId: string, award: { economic: number; innovation: number; problem: number }) {
+    M6_AWARDS[stopId] = award;          // overwrite, never add
+    const stop = STOPS.find(function (s) { return s.id === stopId; });
+    if (stop) stop.done = true;          // lights the gold check, stops the invite glow
+    recomputeM6Totals();
+    console.log("[M6] finished " + stopId + " with award", award, "=> totals", m6Totals);
+  }
+
+  // ---- THE TRAVEL FADE ----  A solid quad that rides just in front of the camera,
+  // square to the view, whose opacity we animate on setInterval. At full cover we
+  // swap the world (onCover); when clear again we settle the view state (onDone).
+  // The same slow fade runs both directions, so entering and leaving feel identical.
+  const fadeMat = new MeshBasicMaterial({
+    color: new Color(VISIT.FADE_COLOR),
+    transparent: true,
+    opacity: 0,
+    depthTest: false,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  const fadeQuad = new Mesh(new PlaneGeometry(VISIT.FADE_SIZE, VISIT.FADE_SIZE), fadeMat);
+  fadeQuad.renderOrder = 100000;     // over the whole world AND any panel
+  fadeQuad.frustumCulled = false;
+  fadeQuad.visible = false;
+  (fadeQuad as any).pointerEvents = "none";
+  scene.add(fadeQuad);
+
+  let fadePhase = "idle"; // "idle" | "out" | "hold" | "in"
+  let fadeElapsed = 0;
+  let fadeOnCover: (() => void) | null = null;
+  let fadeOnDone: (() => void) | null = null;
+  const _fadeEye = new Vector3();
+  const _fadeFwd = new Vector3();
+
+  function startFade(onCover: () => void, onDone: () => void) {
+    fadeOnCover = onCover;
+    fadeOnDone = onDone;
+    fadeElapsed = 0;
+    fadePhase = "out";
+    fadeQuad.visible = true;
+  }
+
+  setInterval(function () {
+    if (!fadeQuad.visible) return;
+    // Ride just in front of the camera, square to the view, so it fills the screen.
+    const cam = world.camera as any;
+    cam.getWorldPosition(_fadeEye);
+    cam.getWorldDirection(_fadeFwd);
+    _fadeFwd.normalize();
+    fadeQuad.position.set(
+      _fadeEye.x + _fadeFwd.x * VISIT.FADE_DIST,
+      _fadeEye.y + _fadeFwd.y * VISIT.FADE_DIST,
+      _fadeEye.z + _fadeFwd.z * VISIT.FADE_DIST,
+    );
+    fadeQuad.quaternion.copy(cam.quaternion);
+
+    if (fadePhase === "out") {
+      fadeElapsed += VISIT.TICK_MS;
+      fadeMat.opacity = Math.min(1, fadeElapsed / VISIT.FADE_MS);
+      if (fadeElapsed >= VISIT.FADE_MS) {
+        fadeMat.opacity = 1;
+        if (fadeOnCover) fadeOnCover();
+        fadePhase = "hold";
+        fadeElapsed = 0;
+      }
+    } else if (fadePhase === "hold") {
+      fadeElapsed += VISIT.TICK_MS;
+      if (fadeElapsed >= VISIT.FADE_HOLD_MS) {
+        fadePhase = "in";
+        fadeElapsed = 0;
+      }
+    } else if (fadePhase === "in") {
+      fadeElapsed += VISIT.TICK_MS;
+      fadeMat.opacity = Math.max(0, 1 - fadeElapsed / VISIT.FADE_MS);
+      if (fadeElapsed >= VISIT.FADE_MS) {
+        fadeMat.opacity = 0;
+        fadeQuad.visible = false;
+        fadePhase = "idle";
+        if (fadeOnDone) fadeOnDone();
+      }
+    }
+  }, VISIT.TICK_MS);
+
+  // ---- HIDE / SHOW THE HUB ----  The stage, ground, Fox, pedestals, titles and
+  // badges all live in hubGroup; the four landmark MODELS are their own ray-target
+  // entities, so we toggle them alongside it. (Selection is also gated on
+  // currentView, so a hidden landmark can never start a visit on its own.)
+  function hideHub() {
+    hubGroup.visible = false;
+    for (const lm of hubLandmarks) if (lm.entity.object3D) lm.entity.object3D.visible = false;
+  }
+  function showHub() {
+    hubGroup.visible = true;
+    for (const lm of hubLandmarks) if (lm.entity.object3D) lm.entity.object3D.visible = true;
+  }
+
+  // ---- THE STOP SHELL (placeholder inside) ----  A description panel plus one big
+  // Finish button, parked ahead of the spawn. The button label never changes, so it
+  // is built once; only the panel's words are rebuilt per stop. The real challenge
+  // replaces what showStop()/hideStop() put INSIDE, not this shell around it.
+  const stopHolder = new Group();
+  scene.add(stopHolder);
+  stopHolder.visible = false;
+  let stopPanelMesh: any = null;
+
+  const finishBtnMesh = makeButtonCard("Finish and return to the map", VISIT.BTN_W, VISIT.BTN_H);
+  finishBtnMesh.position.set(VISIT.BTN_POS[0], VISIT.BTN_POS[1], VISIT.BTN_POS[2]);
+  (finishBtnMesh.material as any).depthTest = false; // always readable over the sky
+  (finishBtnMesh.material as any).depthWrite = false;
+  finishBtnMesh.renderOrder = 50000;
+  const finishBtn = world.createTransformEntity(finishBtnMesh).addComponent(Interactable);
+  if (finishBtn.object3D) finishBtn.object3D.visible = false;
+  let finishWasPressed = false;
+
+  function showStop(stop: any) {
+    // A stop with a decision pack runs through the reusable RUNNER (its own calm
+    // scene, setup line, decisions, readout, and the shared finish button). Stops
+    // without a pack yet keep the simple placeholder panel + finish button below.
+    const pack = DECISION_PACKS[stop.id];
+    if (pack) {
+      showStopScene(stop.id);
+      startDecisionPack(stop, pack);
+      return;
+    }
+    // Rebuild the description for THIS stop (cheap, and it happens under full cover).
+    if (stopPanelMesh) stopHolder.remove(stopPanelMesh);
+    stopPanelMesh = makeTextPanel(
+      stop.name,
+      "This is where you will run the " + stop.name + " challenge.",
+      VISIT.PANEL_W,
+    );
+    (stopPanelMesh.material as any).depthTest = false;
+    (stopPanelMesh.material as any).depthWrite = false;
+    stopPanelMesh.renderOrder = 50000;
+    stopPanelMesh.position.set(VISIT.PANEL_POS[0], VISIT.PANEL_POS[1], VISIT.PANEL_POS[2]);
+    stopHolder.add(stopPanelMesh);
+    stopHolder.visible = true;
+    if (finishBtn.object3D) finishBtn.object3D.visible = true;
+  }
+  function hideStop() {
+    stopHolder.visible = false;
+    if (finishBtn.object3D) finishBtn.object3D.visible = false;
+    hideRunner();          // clear any runner panels / option cards
+    hideAllStopScenes();   // and the calm per-stop backdrop
+  }
+
+  // ---- THE VISIT: enter on a landmark select, finish on the button ----
+  function enterStop(stopId: string) {
+    if (currentView !== "hub") return;   // only the map starts a visit
+    const stop = STOPS.find(function (s) { return s.id === stopId; });
+    if (!stop) return;
+    currentView = "fading";
+    activeStopId = stopId;
+    pendingAward = null;                 // a fresh visit; the runner sets the real award
+    sfxStage();                          // a soft travel cue
+    startFade(
+      function onCover() { hideHub(); showStop(stop); },
+      function onDone() { currentView = "stop"; },
+    );
+  }
+  function finishStop() {
+    if (currentView !== "stop" || !activeStopId) return; // only a real Finish counts
+    sfxClick();
+    // The runner's REAL tally if this stop produced one this visit; otherwise the
+    // placeholder (for stops whose challenge is not built yet).
+    completeStop(activeStopId, pendingAward || VISIT.PLACEHOLDER_AWARD);
+    pendingAward = null;
+    currentView = "fading";
+    startFade(
+      function onCover() { hideStop(); showHub(); activeStopId = null; },
+      function onDone() { currentView = "hub"; },
+    );
+  }
+
+  // ---- POINT-TO-SELECT ----  Watch each landmark for a FRESH press (one that was
+  // not pressed last tick, so a held trigger fires once), and the Finish button the
+  // same way, with a little grow/squish while pointed at. setInterval, not rAF.
+  setInterval(function () {
+    for (const lm of hubLandmarks) {
+      const pressed = !!lm.entity.hasComponent(Pressed);
+      if (currentView === "hub" && pressed && !lm.wasPressed) enterStop(lm.stop.id);
+      lm.wasPressed = pressed;
+    }
+    if (currentView === "stop") {
+      const hov = !!finishBtn.hasComponent(Hovered);
+      const prs = !!finishBtn.hasComponent(Pressed);
+      finishBtnMesh.scale.setScalar(prs ? VISIT.BTN_PRESS_SCALE : (hov ? VISIT.BTN_HOVER_SCALE : 1));
+      if (prs && !finishWasPressed) finishStop();
+      finishWasPressed = prs;
+    } else {
+      finishBtnMesh.scale.setScalar(1);
+      finishWasPressed = false;
+    }
+  }, VISIT.TICK_MS);
+
+  // ======================================================================
+  // DECISION RUNNER  —  the reusable engine the three lean stops share. It plays a
+  // DECISION_PACK (data, defined up top) inside the stop shell: a calm scene, a
+  // setup line, then each decision as a question with three pointable option cards
+  // (the SAME Interactable pointing the hub landmarks use), a short interim readout
+  // after each pick, and finally the shell's "Finish and return to the map" button
+  // carrying the student's REAL tally. Only stops with a pack use it; the rest keep
+  // the placeholder. Tune the layout here; every loop is setInterval (rAF pauses in
+  // the headset).
+  // ======================================================================
+  const RUNNER = {
+    INFO_W: 2.3,            // setup / closing panel width (m)
+    Q_W: 2.3,              // question card width (m)
+    READOUT_W: 2.3,        // interim readout width (m)
+    SETUP_PANEL_POS: [0, 1.95, 3.3] as [number, number, number],
+    Q_PANEL_POS: [0, 2.34, 3.3] as [number, number, number],   // up top, cards below it
+    READOUT_PANEL_POS: [0, 1.95, 3.3] as [number, number, number],
+    CLOSE_PANEL_POS: [0, 1.85, 3.3] as [number, number, number],
+    CARD_W: 2.5,           // option card width (m)
+    CARD_H: 0.44,          // option card height (m)
+    CARD_X: 0,             // option cards are centered in front of the student
+    CARD_TOP_Y: 1.55,      // y of the FIRST (top) option card
+    CARD_STEP: 0.54,       // center-to-center drop between option cards
+    CARD_Z: 3.28,          // option cards distance in front of the spawn
+    BTN_W: 1.6,            // Start / Next button size (m)
+    BTN_H: 0.34,
+    BTN_POS: [0, 0.9, 3.4] as [number, number, number],
+    HOVER_SCALE: 1.06,     // gentle grow while pointed at
+    PRESS_SCALE: 0.95,     // quick squish on press
+    READOUT_HOLD_MS: 900,  // keep the readout up this long to read BEFORE Next appears
+    TICK_MS: 33,
+  };
+
+  // Draw a flat runner mesh OVER the calm scene and the sky (the same trick the
+  // shell uses for its panels): no depth test, lifted render order.
+  function runnerOnTop(mesh: any) {
+    const m = mesh.material;
+    m.depthTest = false;
+    m.depthWrite = false;
+    mesh.renderOrder = 50000;
+  }
+
+  // ---- A small calm BACKDROP per stop, so a decision does not feel like panels
+  // floating in a void. Only Tech Office has one for now; fuller scenery is a later
+  // pass. Props sit BEYOND the panels toward the back wall, never at the spawn. ----
+  function buildTechStopScene(): Group {
+    const g = new Group();
+    const FLOOR = "#28333f";     // cool slate floor
+    const WALL = "#33475c";      // cool blue-gray back wall
+    const RACK = "#1d2731";      // dark server racks
+    const TRIM = "#3b5168";
+    const GLOW = "#37d0e6";      // cyan status glow
+    const DESK = "#5a6b7c";
+    const SCREEN = "#123040";
+
+    // A floor under the standing area and the panels, so there is solid ground.
+    const floor = meshBox(11, 0.12, 13, FLOOR);
+    floor.position.set(0, -0.06, 1.5);
+    g.add(floor);
+
+    // A back wall closes off the void behind the scene.
+    const wall = meshBox(11, 3.2, 0.2, WALL);
+    wall.position.set(0, 1.6, -5);
+    g.add(wall);
+
+    // Two server racks flanking the back, each with a few glowing status strips.
+    for (const sx of [-3.3, 3.3]) {
+      const rack = meshBox(1.1, 2.0, 0.7, RACK);
+      rack.position.set(sx, 1.0, -4);
+      g.add(rack);
+      const trim = meshBox(1.14, 0.1, 0.74, TRIM);
+      trim.position.set(sx, 2.0, -4);
+      g.add(trim);
+      for (const ly of [1.4, 1.0, 0.6]) {
+        const strip = meshBox(0.8, 0.06, 0.02, GLOW);
+        strip.position.set(sx, ly, -3.64);
+        (strip.material as any).emissive = new Color(GLOW);
+        (strip.material as any).emissiveIntensity = 0.9;
+        g.add(strip);
+      }
+    }
+
+    // A simple desk with a glowing monitor, to read as an office.
+    const desk = meshBox(2.0, 0.1, 0.8, DESK);
+    desk.position.set(0, 0.74, -2.4);
+    g.add(desk);
+    for (const lx of [-0.85, 0.85]) {
+      const leg = meshBox(0.1, 0.74, 0.1, TRIM);
+      leg.position.set(lx, 0.37, -2.4);
+      g.add(leg);
+    }
+    const stand = meshBox(0.1, 0.3, 0.1, TRIM);
+    stand.position.set(0, 0.94, -2.5);
+    g.add(stand);
+    const monitor = meshBox(0.95, 0.6, 0.06, RACK);
+    monitor.position.set(0, 1.28, -2.5);
+    g.add(monitor);
+    const screen = meshBox(0.82, 0.47, 0.02, SCREEN);
+    screen.position.set(0, 1.28, -2.46);
+    (screen.material as any).emissive = new Color(GLOW);
+    (screen.material as any).emissiveIntensity = 0.5;
+    g.add(screen);
+
+    return g;
+  }
+
+  const stopScenes: { [id: string]: Group } = {};
+  const techScene = buildTechStopScene();
+  techScene.visible = false;
+  scene.add(techScene);
+  stopScenes["tech"] = techScene;
+
+  function showStopScene(id: string) {
+    for (const key in stopScenes) stopScenes[key].visible = key === id;
+  }
+  function hideAllStopScenes() {
+    for (const key in stopScenes) stopScenes[key].visible = false;
+  }
+
+  // ======================================================================
+  // STOP STAGING  —  the build that assembles itself as the student decides.
+  // Generic by design: a stop registers a staging object; the runner calls
+  // reset() at the start of a visit and addStage(decisionIndex, optionIndex,
+  // reaction) after each pick. The staging owns its own Group (parented to the
+  // stop's calm scene, so it shows/hides with it) and animates from ONE shared
+  // setInterval (rAF pauses in the headset). Only Tech Office has one today; the
+  // other lean stops can register their own the same way, so the runner shell
+  // never grows a per-stop special case.
+  // ======================================================================
+  type StopStaging = {
+    group: Group;
+    reset: () => void;
+    addStage: (decisionIndex: number, optionIndex: number, reaction: StageReaction) => void;
+    tick: (clock: number) => void;
+  };
+  const stopStagings: { [id: string]: StopStaging } = {};
+  type GlowRole = "building" | "power" | "runtime";
+
+  // ---- Tech Office: a data center built piece by piece on the lot ahead of the
+  // student. Decision 1 raises the BUILDING (with a cue for the site chosen),
+  // Decision 2 adds POWER (transformer, lines, and solar panels if chosen),
+  // Decision 3 adds WORKERS and the internet CABLE. Each piece then THRIVES,
+  // STRUGGLES, or runs NEUTRAL based on that pick: a steady bright glow with data
+  // flowing, a dim slow flicker with stalled data, or a quiet steady hum. Every
+  // bit of motion is slow and gentle on purpose (kids in a headset). ----
+  function buildTechStaging(): StopStaging {
+    const C = TECH_BUILD.COLOR;
+    const group = new Group();
+    group.position.z = TECH_BUILD.FORWARD; // bring the whole construction site toward the student
+
+    // role-tagged animated lights and cable "data" flows, all serviced by tick().
+    const glowParts: { mesh: any; role: GlowRole }[] = [];
+    const flows: { dots: any[]; a: number[]; b: number[]; role: GlowRole; t: number }[] = [];
+    const workers: { g: Group }[] = [];
+    // each stage's current reaction (null until built) and its ease-in progress.
+    const reaction: { building: StageReaction | null; power: StageReaction | null; runtime: StageReaction | null } =
+      { building: null, power: null, runtime: null };
+    const appear = { building: 0, power: 0, runtime: 0 };
+
+    // register a mesh as an animated light (intensity driven by its stage's reaction).
+    function lit(mesh: any, color: string, role: GlowRole) {
+      mesh.material.emissive = new Color(color);
+      mesh.material.emissiveIntensity = 0;
+      glowParts.push({ mesh, role });
+      return mesh;
+    }
+    // a fixed self-lit glow that does not animate (used for static site cues).
+    function glowConst(mesh: any, color: string, intensity: number) {
+      mesh.material.emissive = new Color(color);
+      mesh.material.emissiveIntensity = intensity;
+      return mesh;
+    }
+    // a string of little lights that travel a->b along a cable and loop.
+    function addFlow(parent: Group, a: number[], b: number[], role: GlowRole) {
+      const dots: any[] = [];
+      for (let i = 0; i < STAGING.FLOW_DOTS; i++) {
+        const d = meshSphere(STAGING.FLOW_DOT_R, C.flow);
+        (d.material as any).emissive = new Color(C.flow);
+        (d.material as any).emissiveIntensity = 0;
+        d.visible = false;
+        parent.add(d);
+        dots.push(d);
+      }
+      flows.push({ dots, a, b, role, t: 0 });
+    }
+
+    // ---- the empty lot (shown the moment you arrive, before the first pick) ----
+    const lot = meshBox(TECH_BUILD.LOT_W, TECH_BUILD.LOT_THICK, TECH_BUILD.LOT_D, C.pad);
+    lot.position.set(TECH_BUILD.LOT[0], TECH_BUILD.LOT[1], TECH_BUILD.LOT[2]);
+    group.add(lot);
+    const lotTop = TECH_BUILD.LOT[1] + TECH_BUILD.LOT_THICK / 2;
+    // four legs so the lot reads as a build table standing on the floor.
+    const padBottom = TECH_BUILD.LOT[1] - TECH_BUILD.LOT_THICK / 2;
+    for (const lx of [-1.2, 1.2]) {
+      for (const lz of [-1.0, 1.0]) {
+        const leg = meshBox(0.12, padBottom, 0.12, C.line);
+        leg.position.set(lx, padBottom / 2, TECH_BUILD.LOT[2] + lz);
+        group.add(leg);
+      }
+    }
+    const bx = TECH_BUILD.BLD_POS[0], bz = TECH_BUILD.BLD_POS[2];
+    const bW = TECH_BUILD.BLD_W, bH = TECH_BUILD.BLD_H, bD = TECH_BUILD.BLD_D;
+
+    // =================== STAGE 1: the building + the site cue ===================
+    const buildingStage = new Group();
+    buildingStage.visible = false;
+    group.add(buildingStage);
+
+    const walls = meshBox(bW, bH, bD, C.wall);
+    walls.position.set(bx, lotTop + bH / 2, bz);
+    buildingStage.add(walls);
+    const roof = meshBox(bW + 0.04, 0.06, bD + 0.04, C.roof);
+    roof.position.set(bx, lotTop + bH + 0.03, bz);
+    buildingStage.add(roof);
+    // a 2x3 grid of windows on the front face (+z, toward the student) — the lights.
+    const frontZ = bz + bD / 2 + 0.011;
+    for (const wx of [bx - 0.2, bx + 0.2]) {
+      for (const wy of [lotTop + 0.22, lotTop + 0.4, lotTop + 0.58]) {
+        const win = meshBox(0.16, 0.12, 0.012, C.window);
+        win.position.set(wx, wy, frontZ);
+        buildingStage.add(lit(win, C.window, "building"));
+      }
+    }
+
+    // three swappable site cues; addStage reveals the one that matches the pick.
+    const cueNoVA = new Group();
+    const cueCountry = new Group();
+    const cueDowntown = new Group();
+    buildingStage.add(cueNoVA, cueCountry, cueDowntown);
+    function siteTile(color: string) {
+      const tile = meshBox(1.35, 0.02, 1.35, color);
+      tile.position.set(bx, lotTop + 0.012, bz);
+      return tile;
+    }
+    // Northern Virginia: green ground + a glowing "fast line" leading toward the net.
+    cueNoVA.add(siteTile(C.grass));
+    const fastLine = meshBox(0.7, 0.012, 0.08, C.flow);
+    fastLine.position.set(bx - 0.78, lotTop + 0.02, bz + 0.5);
+    cueNoVA.add(glowConst(fastLine, C.flow, 0.6));
+    // Countryside: dry dirt + a lone tree far off, to read "out on its own".
+    cueCountry.add(siteTile(C.dirt));
+    const trunk = meshCyl(0.04, 0.05, 0.3, C.tree);
+    trunk.position.set(0.95, lotTop + 0.15, -1.7);
+    cueCountry.add(trunk);
+    const leaf = meshCone(0.22, 0.42, C.leaf);
+    leaf.position.set(0.95, lotTop + 0.5, -1.7);
+    cueCountry.add(leaf);
+    // Downtown: concrete + tall neighbors crowding the lot, no room to grow.
+    cueDowntown.add(siteTile(C.concrete));
+    const n1 = meshBox(0.5, 1.4, 0.5, "#7d868f");
+    n1.position.set(-1.15, lotTop + 0.7, -1.5);
+    cueDowntown.add(n1);
+    const n2 = meshBox(0.45, 1.1, 0.45, "#8b949c");
+    n2.position.set(0.55, lotTop + 0.55, -1.6);
+    cueDowntown.add(n2);
+    cueNoVA.visible = cueCountry.visible = cueDowntown.visible = false;
+
+    // =============== STAGE 2: power (transformer, lines, optional solar) ========
+    const powerStage = new Group();
+    powerStage.visible = false;
+    group.add(powerStage);
+    const tx = TECH_BUILD.TRANSFORMER_POS[0], tz = TECH_BUILD.TRANSFORMER_POS[2];
+    const trans = meshBox(0.3, 0.34, 0.3, C.transformer);
+    trans.position.set(tx, lotTop + 0.17, tz);
+    powerStage.add(trans);
+    for (const ox of [-0.08, 0.08]) {
+      const bush = meshCyl(0.03, 0.03, 0.1, C.bushing);
+      bush.position.set(tx + ox, lotTop + 0.39, tz);
+      powerStage.add(bush);
+    }
+    const indicator = meshBox(0.09, 0.05, 0.012, C.indicator);
+    indicator.position.set(tx, lotTop + 0.2, tz + 0.151);
+    powerStage.add(lit(indicator, C.indicator, "power"));
+    // a pole and a line carrying power across to the building; data flows along it.
+    const pole = meshCyl(0.02, 0.02, 0.7, C.pole);
+    pole.position.set(tx, lotTop + 0.35, tz);
+    powerStage.add(pole);
+    const bRightX = bx + bW / 2;
+    const lineY = lotTop + 0.66;
+    const line = meshBox(tx - bRightX, 0.02, 0.02, C.line);
+    line.position.set((tx + bRightX) / 2, lineY, tz);
+    powerStage.add(line);
+    addFlow(powerStage, [tx, lineY, tz], [bRightX, lineY, bz + bD / 2 - 0.1], "power");
+    // solar panels — only when the student adds them (the "smart, modern touch").
+    const solarGroup = new Group();
+    powerStage.add(solarGroup);
+    for (const sx of [TECH_BUILD.SOLAR_POS[0] - 0.18, TECH_BUILD.SOLAR_POS[0] + 0.2]) {
+      const post = meshCyl(0.02, 0.02, 0.2, C.pole);
+      post.position.set(sx, lotTop + 0.1, TECH_BUILD.SOLAR_POS[2]);
+      solarGroup.add(post);
+      const panel = meshBox(0.34, 0.02, 0.26, C.solar);
+      panel.position.set(sx, lotTop + 0.26, TECH_BUILD.SOLAR_POS[2]);
+      panel.rotation.x = -0.6;
+      solarGroup.add(panel);
+      const gleam = meshBox(0.3, 0.006, 0.04, C.solarGleam);
+      gleam.position.set(sx, lotTop + 0.29, TECH_BUILD.SOLAR_POS[2] + 0.04);
+      gleam.rotation.x = -0.6;
+      solarGroup.add(lit(gleam, C.solarGleam, "power"));
+    }
+    solarGroup.visible = false;
+
+    // =============== STAGE 3: workers + the internet cable ======================
+    const runtimeStage = new Group();
+    runtimeStage.visible = false;
+    group.add(runtimeStage);
+    // an internet node (a little cloud on a post) at the edge of the lot.
+    const nx = TECH_BUILD.NODE_POS[0], nz = TECH_BUILD.NODE_POS[2];
+    const nodePost = meshCyl(0.025, 0.025, 0.52, C.pole);
+    nodePost.position.set(nx, lotTop + 0.26, nz);
+    runtimeStage.add(nodePost);
+    for (const puffAt of [[-0.1, 0.6, 0, 0.12], [0.08, 0.62, 0.02, 0.1], [0.0, 0.58, -0.06, 0.1]]) {
+      const puff = meshSphere(puffAt[3], C.cloud);
+      puff.position.set(nx + puffAt[0], lotTop + puffAt[1], nz + puffAt[2]);
+      runtimeStage.add(puff);
+    }
+    const nodeGlow = meshSphere(0.05, C.nodeGlow);
+    nodeGlow.position.set(nx, lotTop + 0.6, nz + 0.12);
+    runtimeStage.add(lit(nodeGlow, C.nodeGlow, "runtime"));
+    // the cable from the building to the internet, carrying data when it runs well.
+    const bLeftX = bx - bW / 2;
+    const cableY = lotTop + 0.5;
+    const cable = meshBox(bLeftX - nx, 0.018, 0.018, C.line);
+    cable.position.set((bLeftX + nx) / 2, cableY, nz);
+    runtimeStage.add(cable);
+    addFlow(runtimeStage, [bLeftX, cableY, bz], [nx, cableY, nz], "runtime");
+    // up to three workers in front (one only, when run with as few people as possible).
+    for (const spot of [[-0.75, -0.3], [-0.4, -0.12], [-0.05, -0.32]]) {
+      const wg = new Group();
+      const body = meshCyl(0.05, 0.06, 0.14, C.vest);
+      body.position.set(spot[0], lotTop + 0.07, spot[1]);
+      wg.add(body);
+      const head = meshSphere(0.045, C.helmet);
+      head.position.set(spot[0], lotTop + 0.18, spot[1]);
+      wg.add(head);
+      runtimeStage.add(wg);
+      workers.push({ g: wg });
+    }
+
+    const stages: GlowRole[] = ["building", "power", "runtime"];
+    const stageGroup: { [k in GlowRole]: Group } = { building: buildingStage, power: powerStage, runtime: runtimeStage };
+
+    // a slow, uneven 0..1 wave for the "struggling" look — gentle, never a strobe.
+    function flicker(t: number) {
+      const w = 0.6 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_A * t)
+              + 0.4 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_B * t + 1.3);
+      return 0.5 + 0.5 * w;
+    }
+
+    // ---- the three calls the runner drives ----
+    function reset() {
+      reaction.building = reaction.power = reaction.runtime = null;
+      appear.building = appear.power = appear.runtime = 0;
+      buildingStage.visible = powerStage.visible = runtimeStage.visible = false;
+      buildingStage.position.y = powerStage.position.y = runtimeStage.position.y = 0;
+      cueNoVA.visible = cueCountry.visible = cueDowntown.visible = false;
+      solarGroup.visible = false;
+      for (const w of workers) w.g.visible = false;
+      for (const gp of glowParts) gp.mesh.material.emissiveIntensity = 0;
+      for (const fl of flows) { fl.t = 0; for (const d of fl.dots) d.visible = false; }
+    }
+
+    function addStage(i: number, optionIndex: number, r: StageReaction) {
+      if (i === 0) {
+        cueNoVA.visible = optionIndex === 1;     // option 1 = Northern Virginia
+        cueCountry.visible = optionIndex === 0;  // option 0 = countryside
+        cueDowntown.visible = optionIndex === 2; // option 2 = downtown
+        reaction.building = r; appear.building = 0; buildingStage.visible = true;
+      } else if (i === 1) {
+        solarGroup.visible = optionIndex === 1;  // option 1 = reliable supply + solar
+        reaction.power = r; appear.power = 0; powerStage.visible = true;
+      } else if (i === 2) {
+        const few = optionIndex === 1;           // option 1 = as few people as possible
+        for (let k = 0; k < workers.length; k++) workers[k].g.visible = few ? k === 0 : true;
+        reaction.runtime = r; appear.runtime = 0; runtimeStage.visible = true;
+      }
+    }
+
+    function tick(clock: number) {
+      const t = clock / 1000;
+      // ease each freshly-added stage up into place (a gentle rise, no pop).
+      for (const key of stages) {
+        if (reaction[key] && appear[key] < 1) {
+          appear[key] = Math.min(1, appear[key] + STAGING.TICK_MS / STAGING.APPEAR_MS);
+        }
+        const e = 1 - (1 - appear[key]) * (1 - appear[key]); // ease-out
+        stageGroup[key].position.y = (1 - e) * -STAGING.APPEAR_RISE;
+      }
+      // drive each role-tagged light to match its stage's reaction.
+      for (const gp of glowParts) {
+        const r = reaction[gp.role];
+        if (!r) continue;
+        let v: number;
+        if (r === "thrive") v = STAGING.THRIVE_GLOW + STAGING.THRIVE_PULSE_AMP * Math.sin(2 * Math.PI * STAGING.THRIVE_PULSE_HZ * t);
+        else if (r === "neutral") v = STAGING.NEUTRAL_GLOW;
+        else v = STAGING.STRUGGLE_GLOW_MIN + (STAGING.STRUGGLE_GLOW_MAX - STAGING.STRUGGLE_GLOW_MIN) * flicker(t);
+        gp.mesh.material.emissiveIntensity = v * appear[gp.role];
+      }
+      // run the data flows: smooth when thriving, a trickle when neutral, a crawl
+      // (that stalls on the flicker low points) when struggling.
+      for (const fl of flows) {
+        const r = reaction[fl.role];
+        if (!r) { for (const d of fl.dots) d.visible = false; continue; }
+        let speed: number, glow: number;
+        if (r === "thrive") { speed = STAGING.FLOW_SPEED_THRIVE; glow = STAGING.FLOW_GLOW_THRIVE; }
+        else if (r === "neutral") { speed = STAGING.FLOW_SPEED_NEUTRAL; glow = STAGING.FLOW_GLOW_NEUTRAL; }
+        else { speed = STAGING.FLOW_SPEED_STRUGGLE * (0.2 + 0.8 * flicker(t)); glow = STAGING.FLOW_GLOW_STRUGGLE; }
+        fl.t = (fl.t + speed * (STAGING.TICK_MS / 1000)) % 1;
+        const a = fl.a, b = fl.b;
+        const vis = appear[fl.role] > 0.2;
+        for (let i = 0; i < fl.dots.length; i++) {
+          const d = fl.dots[i];
+          const f = (fl.t + i / fl.dots.length) % 1;
+          d.position.set(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f);
+          d.visible = vis;
+          (d.material as any).emissiveIntensity = glow * appear[fl.role];
+        }
+      }
+      // a tiny idle bob for the workers when the center is thriving (they're busy).
+      const lively = reaction.runtime === "thrive";
+      for (let i = 0; i < workers.length; i++) {
+        workers[i].g.position.y = lively
+          ? Math.abs(Math.sin(2 * Math.PI * STAGING.WORKER_BOB_HZ * t + i)) * STAGING.WORKER_BOB_AMP
+          : 0;
+      }
+    }
+
+    reset();
+    return { group, reset, addStage, tick };
+  }
+
+  const techStaging = buildTechStaging();
+  techScene.add(techStaging.group);
+  stopStagings["tech"] = techStaging;
+
+  // One shared loop animates whichever stop's staging is active. setInterval, not
+  // rAF (which pauses in the headset). Idle on the hub, where nothing is built.
+  let stagingClock = 0;
+  setInterval(function () {
+    stagingClock += STAGING.TICK_MS;
+    if (currentView === "hub") return;
+    const st = activeStopId ? stopStagings[activeStopId] : null;
+    if (st) st.tick(stagingClock);
+  }, STAGING.TICK_MS);
+
+  // ---- The runner's own pressables: a small fixed POOL reused across decisions,
+  // so we never churn ray-target entities. Each is a flat card/button wrapped in an
+  // Interactable, hidden until a beat enables it; one loop edge-detects a fresh
+  // press and adds the grow/squish feedback. Hidden interactables are skipped by
+  // the existing hit-test guard, and we also gate on currentView + an enabled flag,
+  // so a stray ray can never fire the wrong beat. ----
+  type Pressable = {
+    entity: any;
+    mesh: any;
+    enabled: boolean;
+    wasPressed: boolean;
+    onPress: (() => void) | null;
+    card?: { setLabel: (l: string, a?: string) => void };
+  };
+
+  const runnerHolder = new Group();
+  scene.add(runnerHolder);
+  runnerHolder.visible = false;
+  let runnerPanelMesh: any = null;
+
+  // Swap in the beat's panel (setup / question / readout / closing). The plain
+  // panel meshes live in runnerHolder; the pressables below are their own entities.
+  function setRunnerPanel(mesh: any, pos: [number, number, number]) {
+    if (runnerPanelMesh) runnerHolder.remove(runnerPanelMesh);
+    runnerOnTop(mesh);
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    runnerHolder.add(mesh);
+    runnerPanelMesh = mesh;
+  }
+
+  function makePressable(mesh: any): Pressable {
+    runnerOnTop(mesh);
+    const entity = world.createTransformEntity(mesh).addComponent(Interactable);
+    if (entity.object3D) entity.object3D.visible = false;
+    return { entity, mesh, enabled: false, wasPressed: false, onPress: null };
+  }
+
+  function enablePressable(p: Pressable, onPress: () => void) {
+    p.onPress = onPress;
+    p.enabled = true;
+    p.mesh.scale.setScalar(1);
+    if (p.entity.object3D) p.entity.object3D.visible = true;
+    p.wasPressed = !!p.entity.hasComponent(Pressed); // re-arm: never fire on a carried-over press
+  }
+  function disablePressable(p: Pressable) {
+    p.enabled = false;
+    p.onPress = null;
+    p.wasPressed = false;
+    p.mesh.scale.setScalar(1);
+    if (p.entity.object3D) p.entity.object3D.visible = false;
+  }
+
+  // The three reusable option cards, plus the Start and Next buttons.
+  const choiceCards: Pressable[] = [];
+  for (let i = 0; i < 3; i++) {
+    const card = makeChoiceCard(RUNNER.CARD_W, RUNNER.CARD_H);
+    const p = makePressable(card.mesh);
+    p.card = card;
+    choiceCards.push(p);
+  }
+  const startBtn = makePressable(makeButtonCard("Start", RUNNER.BTN_W, RUNNER.BTN_H));
+  const nextBtn = makePressable(makeButtonCard("Next", RUNNER.BTN_W, RUNNER.BTN_H));
+  startBtn.entity.object3D!.position.set(RUNNER.BTN_POS[0], RUNNER.BTN_POS[1], RUNNER.BTN_POS[2]);
+  nextBtn.entity.object3D!.position.set(RUNNER.BTN_POS[0], RUNNER.BTN_POS[1], RUNNER.BTN_POS[2]);
+
+  // ---- Runner state for the current stop ----
+  let runnerPack: DecisionPack | null = null;
+  let runnerStop: any = null;
+  let runnerIndex = 0;
+  const runnerTally = { ei: 0, it: 0, ps: 0 };
+  // The readout's "read it first" beat: while this counts down (in TICK_MS steps),
+  // the readout is up and the Next button is hidden; at zero the Next action appears.
+  let readoutHoldTicks = 0;
+  let pendingNextAction: (() => void) | null = null;
+
+  // Clear every runner pressable + panel (used on hideStop / between visits).
+  function hideRunner() {
+    runnerHolder.visible = false;
+    if (runnerPanelMesh) { runnerHolder.remove(runnerPanelMesh); runnerPanelMesh = null; }
+    readoutHoldTicks = 0;
+    pendingNextAction = null;
+    for (const c of choiceCards) disablePressable(c);
+    disablePressable(startBtn);
+    disablePressable(nextBtn);
+  }
+
+  // Beat 1: the setup line (Fox's framing) + a Start button.
+  function beatSetup() {
+    setRunnerPanel(makeTextPanel(runnerStop.name, runnerPack!.setup, RUNNER.INFO_W), RUNNER.SETUP_PANEL_POS);
+    for (const c of choiceCards) disablePressable(c);
+    disablePressable(nextBtn);
+    if (finishBtn.object3D) finishBtn.object3D.visible = false;
+    enablePressable(startBtn, function () { sfxClick(); beatDecision(0); });
+    runnerHolder.visible = true;
+  }
+
+  // Beat 2: one decision — the question up top, three option cards below.
+  function beatDecision(i: number) {
+    runnerIndex = i;
+    const d = runnerPack!.decisions[i];
+    const n = runnerPack!.decisions.length;
+    setRunnerPanel(makeInfoCard("Choice " + (i + 1) + " of " + n, d.question, RUNNER.Q_W), RUNNER.Q_PANEL_POS);
+    disablePressable(startBtn);
+    disablePressable(nextBtn);
+    if (finishBtn.object3D) finishBtn.object3D.visible = false;
+    for (let k = 0; k < choiceCards.length; k++) {
+      const opt = d.options[k];
+      const p = choiceCards[k];
+      p.card!.setLabel(opt.label, runnerStop.color);
+      p.entity.object3D!.position.set(RUNNER.CARD_X, RUNNER.CARD_TOP_Y - k * RUNNER.CARD_STEP, RUNNER.CARD_Z);
+      enablePressable(p, function () { onPick(opt, k); });
+    }
+    runnerHolder.visible = true;
+  }
+
+  // A pick: add its effects to this stop's running tally, then show the readout.
+  function onPick(opt: DecisionOption, optionIndex: number) {
+    sfxCoin();
+    runnerTally.ei += opt.effects.ei;
+    runnerTally.it += opt.effects.it;
+    runnerTally.ps += opt.effects.ps;
+    // Assemble the matching build piece in the scene and let it react to this pick.
+    // (The meter math above and the color-coded readout below are unchanged.)
+    const staging = runnerStop ? stopStagings[runnerStop.id] : null;
+    if (staging) staging.addStage(runnerIndex, optionIndex, opt.reaction || "neutral");
+    console.log("[RUNNER] picked:", opt.label, opt.effects, opt.reaction, "=> stop tally", { ...runnerTally });
+    beatReadout(opt);
+  }
+
+  // Beat 3: the polished VISIBLE-CONSEQUENCES readout (Module 8's look) — the pick's
+  // effect on each meter, green for a gain and red for a drop, unchanged meters left
+  // out, with the result note beneath it for the "why". The readout stays up a beat
+  // so the student reads it; THEN the Next button appears (revealed by the runner's
+  // setInterval loop via readoutHoldTicks). Next advances to the next decision or
+  // the finish. The decision data, the tally, and completeStop are untouched.
+  function beatReadout(opt: DecisionOption) {
+    for (const c of choiceCards) disablePressable(c);
+    disablePressable(startBtn);
+    disablePressable(nextBtn); // hidden until the readout has been up long enough to read
+    const changes = [
+      { label: "Economic Impact", delta: opt.effects.ei },
+      { label: "Innovation Thinking", delta: opt.effects.it },
+      { label: "Problem Solving", delta: opt.effects.ps },
+    ];
+    setRunnerPanel(makeReadoutCard(changes, opt.note, { widthMeters: RUNNER.READOUT_W }), RUNNER.READOUT_PANEL_POS);
+    if (finishBtn.object3D) finishBtn.object3D.visible = false;
+    // Queue the Next action; the service loop reveals the button after the hold.
+    const last = runnerIndex >= runnerPack!.decisions.length - 1;
+    pendingNextAction = function () {
+      sfxClick();
+      if (last) beatFinish();
+      else beatDecision(runnerIndex + 1);
+    };
+    readoutHoldTicks = Math.ceil(RUNNER.READOUT_HOLD_MS / RUNNER.TICK_MS);
+    runnerHolder.visible = true;
+  }
+
+  // Beat 4: after the last decision — a wrap-up line and the shell's EXISTING
+  // Finish button, now carrying the student's real tally (not the placeholder).
+  function beatFinish() {
+    for (const c of choiceCards) disablePressable(c);
+    disablePressable(startBtn);
+    disablePressable(nextBtn);
+    setRunnerPanel(
+      makeTextPanel("All set!", "You set up the data center. Press the button to return to the map.", RUNNER.INFO_W),
+      RUNNER.CLOSE_PANEL_POS,
+    );
+    // Hand the real totals to the shell; finishStop reads pendingAward.
+    pendingAward = { economic: runnerTally.ei, innovation: runnerTally.it, problem: runnerTally.ps };
+    console.log("[RUNNER] finished " + runnerStop.id + " => award", pendingAward);
+    finishWasPressed = true; // require a fresh press, so revealing the button never auto-fires
+    if (finishBtn.object3D) finishBtn.object3D.visible = true;
+    runnerHolder.visible = true;
+  }
+
+  // Start a pack for a stop: reset the tally and show the setup beat.
+  function startDecisionPack(stop: any, pack: DecisionPack) {
+    runnerStop = stop;
+    runnerPack = pack;
+    runnerIndex = 0;
+    runnerTally.ei = 0;
+    runnerTally.it = 0;
+    runnerTally.ps = 0;
+    readoutHoldTicks = 0;
+    pendingNextAction = null;
+    const staging = stopStagings[stop.id]; // clear any pieces left from a prior visit
+    if (staging) staging.reset();
+    beatSetup();
+  }
+
+  // One loop services every runner pressable: grow on hover, squish on press, and
+  // fire a fresh press once. It also runs the readout's "read it first" countdown,
+  // revealing the Next button once the hold elapses. Gated on currentView + each
+  // pressable's enabled flag. setInterval (rAF pauses in the headset).
+  setInterval(function () {
+    const live = currentView === "stop";
+    // Readout hold: count down, then reveal the queued Next action as a clear button.
+    if (live && readoutHoldTicks > 0) {
+      readoutHoldTicks -= 1;
+      if (readoutHoldTicks === 0 && pendingNextAction) {
+        enablePressable(nextBtn, pendingNextAction);
+        pendingNextAction = null;
+      }
+    }
+    const all = [startBtn, nextBtn, choiceCards[0], choiceCards[1], choiceCards[2]];
+    for (const p of all) {
+      if (!live || !p.enabled) {
+        p.mesh.scale.setScalar(1);
+        p.wasPressed = false;
+        continue;
+      }
+      const hov = !!p.entity.hasComponent(Hovered);
+      const prs = !!p.entity.hasComponent(Pressed);
+      p.mesh.scale.setScalar(prs ? RUNNER.PRESS_SCALE : hov ? RUNNER.HOVER_SCALE : 1);
+      if (prs && !p.wasPressed && p.onPress) p.onPress();
+      p.wasPressed = prs;
+    }
+  }, RUNNER.TICK_MS);
+
+  // ======================================================================
+  // HUB METERS PANEL  —  a fixed card in the upper-left of the map showing the
+  // three running totals as filling bars, in the SAME colors as the end report
+  // (ui/hub-meters.uikitml mirrors ui/report.uikitml's bars). It reads the live
+  // m6Totals the report uses, so the bars fill as stops finish, and sit empty
+  // when nothing is done. It rides with the hub (mirrors hubGroup.visible) so it
+  // hides inside a stop, without touching the visit loop. setInterval only.
+  // ======================================================================
+  const HUB_METERS = {
+    POS: [-1.7, 2.5, 4.4] as [number, number, number], // upper-left, above Fox's bubble
+    YAW: 0.58,           // radians; turns the card to face the student (about 33 deg)
+    MAXW: 1.0,           // panel physical width (metres)
+    MAXH: 0.8,           // panel physical height (metres)
+    TRACK: 68,           // must match the .track width in ui/hub-meters.uikitml
+    EASE: 0.16,          // how fast each bar eases toward its total each tick
+    TICK_MS: 33,         // loop rate (rAF pauses in the headset)
+  };
+  const hubMetersPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/hub-meters.json", maxWidth: HUB_METERS.MAXW, maxHeight: HUB_METERS.MAXH });
+  hubMetersPanel.object3D!.position.set(HUB_METERS.POS[0], HUB_METERS.POS[1], HUB_METERS.POS[2]);
+  hubMetersPanel.object3D!.rotation.set(0, HUB_METERS.YAW, 0, "YXZ"); // turn to face the student
+
+  let hubMetersDoc: any = null;
+  whenPanelReady(hubMetersPanel, function (doc) { hubMetersDoc = doc; });
+
+  // Eased display values, so a finished stop visibly FILLS its bar rather than
+  // snapping. We only push a bar when its rounded number actually changed.
+  const hubShown = { economic: 0, innovation: 0, problem: 0 };
+  const hubLast = { economic: -1, innovation: -1, problem: -1 };
+  function pushHubMeter(key: "economic" | "innovation" | "problem", fillId: string, valId: string) {
+    const rounded = Math.round(hubShown[key]);
+    if (rounded === hubLast[key]) return;
+    hubLast[key] = rounded;
+    const f = hubMetersDoc.getElementById(fillId);
+    if (f) f.setProperties({ width: (HUB_METERS.TRACK * hubShown[key]) / 100 });
+    const v = hubMetersDoc.getElementById(valId);
+    if (v) v.setProperties({ text: String(rounded) });
+  }
+  setInterval(function () {
+    // Ride with the hub: shown on the map, hidden inside a stop. Mirroring
+    // hubGroup.visible means the swap happens under the fade cover, so no pop.
+    const onMap = hubGroup.visible;
+    if (hubMetersPanel.object3D) hubMetersPanel.object3D.visible = onMap;
+    if (!hubMetersDoc || !onMap) return; // only animate while the map is in view
+    let k: "economic" | "innovation" | "problem";
+    for (k of ["economic", "innovation", "problem"] as const) {
+      const target = m6Totals[k];
+      if (Math.abs(target - hubShown[k]) < 0.5) hubShown[k] = target; // settle exactly
+      else hubShown[k] += (target - hubShown[k]) * HUB_METERS.EASE;
+    }
+    pushHubMeter("economic", "hub-fill-economic", "hub-val-economic");
+    pushHubMeter("innovation", "hub-fill-innovation", "hub-val-innovation");
+    pushHubMeter("problem", "hub-fill-problem", "hub-val-problem");
+  }, HUB_METERS.TICK_MS);
 
   // Start the flow at Setup.
   // ==========================================================================

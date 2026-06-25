@@ -368,6 +368,355 @@ export function makeTextPanel(title: string, body: string, widthMeters = 1.7): M
   );
 }
 
+// A compact hub TITLE card that hugs three short lines: a bold place name, a
+// smaller region line, and a smaller flavor tagline. The canvas is short on
+// purpose, so there is no tall band of blank sky under the words. All four hub
+// cards share these dimensions, so a row of them stays aligned. Returns a flat
+// Mesh you position and turn to face the student (its front is +Z).
+export function makeTitleCard(name: string, region: string, tagline: string, widthMeters = 0.92): Mesh {
+  const W = 1024;
+  const H = 270; // short: just tall enough for the three lines
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // Parchment card with a warm gold border, hugging the text.
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 32);
+  ctx.fill();
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 32);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // Place name, large and dark for high contrast.
+  ctx.fillStyle = "#5b3a24";
+  ctx.font = "bold 70px sans-serif";
+  ctx.fillText(name, W / 2, 64);
+
+  // Region line, smaller.
+  ctx.fillStyle = "#7c5a3a";
+  ctx.font = "46px sans-serif";
+  ctx.fillText(region, W / 2, 142);
+
+  // Flavor tagline, smaller still and a touch green, so it reads as a friendly aside.
+  ctx.fillStyle = "#3a7d50";
+  ctx.font = "italic 40px sans-serif";
+  ctx.fillText(tagline, W / 2, 212);
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
+// A big, friendly BUTTON face: a solid rounded plate in the house gold with a
+// bold navy label, baked on a canvas so it shows in the headset AND on the laptop
+// (DOM overlays do not render in the headset). Returns a flat Mesh (front is +Z);
+// wrap it in an Interactable entity to make it pressable. Used by the stop shell's
+// "Finish and return to the map" button; reusable for other in-headset buttons.
+export function makeButtonCard(label: string, widthMeters = 1.2, heightMeters = 0.36): Mesh {
+  const W = 1024;
+  const H = Math.max(160, Math.round((W * heightMeters) / widthMeters));
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // Gold plate with a darker gold border, corners rounded to a soft pill.
+  const r = H * 0.34;
+  ctx.fillStyle = "#f4c20d";
+  tracePanel(ctx, 10, 10, W - 20, H - 20, r);
+  ctx.fill();
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = "#9c6f12";
+  tracePanel(ctx, 10, 10, W - 20, H - 20, r);
+  ctx.stroke();
+
+  // Bold navy label, centered, shrunk until it fits with comfortable margins.
+  ctx.fillStyle = SIGN_NAVY;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  let size = Math.round(H * 0.4);
+  do {
+    ctx.font = "bold " + size + "px sans-serif";
+    size -= 2;
+  } while (ctx.measureText(label).width > W - 90 && size > 16);
+  ctx.fillText(label, W / 2, H / 2 + 2);
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
+// A CHOICE CARD: a parchment option card with a colored border and a wrapped,
+// readable label, baked on a canvas so it shows in the headset AND on the laptop.
+// Built once and RE-LABELED each decision via setLabel, so the runner reuses a
+// small pool of cards instead of churning ray-target entities. Wrap the returned
+// mesh in an Interactable to make it pointable, the same way the hub landmarks
+// are. The label auto-shrinks and wraps so even a long sentence stays readable.
+export function makeChoiceCard(
+  widthMeters = 2.4,
+  heightMeters = 0.46,
+): { mesh: Mesh; setLabel: (label: string, accent?: string) => void } {
+  const W = 1024;
+  const H = Math.max(180, Math.round((W * heightMeters) / widthMeters));
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  const mesh = new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+
+  function setLabel(label: string, accent = "#caa24a") {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#fbf3dd";
+    tracePanel(ctx, 8, 8, W - 16, H - 16, 28);
+    ctx.fill();
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = accent;
+    tracePanel(ctx, 8, 8, W - 16, H - 16, 28);
+    ctx.stroke();
+
+    ctx.fillStyle = "#3a3326";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // The largest font (down to a floor) whose wrapped lines fit the card height.
+    let size = 56;
+    let lines: string[] = [];
+    for (;;) {
+      ctx.font = "600 " + size + "px sans-serif";
+      lines = wrapLines(ctx, label, W - 110);
+      if (size <= 30 || lines.length * (size * 1.18) <= H - 44) break;
+      size -= 2;
+    }
+    const lh = size * 1.18;
+    const startY = H / 2 - ((lines.length - 1) * lh) / 2;
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W / 2, startY + i * lh);
+    tex.needsUpdate = true;
+  }
+
+  return { mesh, setLabel };
+}
+
+// A COMPACT INFO CARD: a short parchment card with a small gold eyebrow line and a
+// wrapped body, for the runner's framing and each decision's question. It is short
+// on purpose so the question sits above the option cards without crowding them.
+// Front is +Z; baked on canvas so it renders in the headset.
+export function makeInfoCard(eyebrow: string, body: string, widthMeters = 2.3): Mesh {
+  const W = 1024;
+  const H = 360;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 32);
+  ctx.fill();
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 32);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+
+  // Small gold eyebrow at the top (a step indicator like "CHOICE 1 OF 3").
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#9c6f12";
+  ctx.font = "bold 34px sans-serif";
+  ctx.fillText(eyebrow.toUpperCase(), W / 2, 40);
+
+  // Body, auto-fit and wrapped, centered in the space below the eyebrow.
+  ctx.fillStyle = "#3a3326";
+  ctx.textBaseline = "middle";
+  const top = 110;
+  const bottom = H - 36;
+  let size = 54;
+  let lines: string[] = [];
+  for (;;) {
+    ctx.font = "bold " + size + "px sans-serif";
+    lines = wrapLines(ctx, body, W - 130);
+    if (size <= 30 || lines.length * (size * 1.2) <= bottom - top) break;
+    size -= 2;
+  }
+  const lh = size * 1.2;
+  const mid = (top + bottom) / 2;
+  const startY = mid - ((lines.length - 1) * lh) / 2;
+  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W / 2, startY + i * lh);
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
+// The polished VISIBLE-CONSEQUENCES readout, reusing Module 8's look exactly: each
+// meter that moved shows as a bold line "Label   +N", GREEN for a gain and RED for
+// a drop, and a meter that did not change is left out entirely (just as Module 8's
+// setMeterChange hides an unchanged meter). Under the changes sits the option's
+// result note, in navy like Module 8's ready-text, so the student sees what changed
+// AND why. Front is +Z; baked on canvas so it renders in the headset, not just the
+// laptop. Pass the up/down colors to match a project's palette; the defaults are
+// Module 8's own DELTA_UP / DELTA_DOWN.
+export function makeReadoutCard(
+  changes: { label: string; delta: number }[],
+  note: string,
+  opts: { upColor?: string; downColor?: string; widthMeters?: number } = {},
+): Mesh {
+  const upColor = opts.upColor ?? "#2e7d32";     // Module 8 DELTA_UP (green gain)
+  const downColor = opts.downColor ?? "#b23a2e"; // Module 8 DELTA_DOWN (red drop)
+  const widthMeters = opts.widthMeters ?? 2.3;
+  const W = 1024;
+  const H = 540;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // Parchment card with a warm gold border (the shared panel look).
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 40);
+  ctx.fill();
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 40);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+
+  // Only the meters that actually moved (unchanged ones are left out, like Module 8).
+  const moved = changes.filter(function (m) { return m.delta !== 0; });
+
+  // Block sizes, measured up front so the whole readout can be vertically centered
+  // on the card no matter how many change lines or note lines it ends up with.
+  const EYE = 30, EYE_GAP = 26;
+  const CH = 50, CH_LH = 64;
+  const NT = 40, NT_LH = 52, NT_GAP = 30;
+  ctx.font = NT + "px sans-serif";
+  const noteLines = wrapLines(ctx, note, W - 150);
+  const changeCount = moved.length || 1;
+  const totalH = EYE + EYE_GAP + changeCount * CH_LH + NT_GAP + noteLines.length * NT_LH;
+  let y = Math.max(40, (H - totalH) / 2);
+
+  // A small gold eyebrow, echoing Module 8's result eyebrow.
+  ctx.fillStyle = "#8a6118";
+  ctx.font = "bold " + EYE + "px sans-serif";
+  ctx.fillText("HERE IS WHAT CHANGED", W / 2, y);
+  y += EYE + EYE_GAP;
+
+  // The meter changes: green for a gain, red for a drop, signed and bold.
+  ctx.font = "bold " + CH + "px sans-serif";
+  if (moved.length === 0) {
+    ctx.fillStyle = "#3a3326";
+    ctx.fillText("No change this time.", W / 2, y);
+    y += CH_LH;
+  } else {
+    for (const m of moved) {
+      ctx.fillStyle = m.delta > 0 ? upColor : downColor;
+      ctx.fillText(m.label + "   " + (m.delta > 0 ? "+" : "") + m.delta, W / 2, y);
+      y += CH_LH;
+    }
+  }
+  y += NT_GAP;
+
+  // The result note, in navy like Module 8's ready-text: the "why" under the "what".
+  ctx.fillStyle = "#1F3A5F";
+  ctx.font = NT + "px sans-serif";
+  for (const ln of noteLines) {
+    ctx.fillText(ln, W / 2, y);
+    y += NT_LH;
+  }
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
+// A SPEECH BUBBLE card: the same parchment look as makeTextPanel, but smaller
+// and with a little tail at the bottom so it reads as words spoken by whoever
+// stands below it (here, Foreman Fox). Title + wrapped body, then a downward
+// triangular tail. Returns a flat Mesh; its front is +Z and the tail points down.
+export function makeSpeechBubble(title: string, body: string, widthMeters = 0.8): Mesh {
+  const W = 900;
+  const H = 500;
+  const tailH = 80;
+  const cardBottom = H - tailH; // bubble body ends here; the tail hangs below
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // The bubble body (a rounded parchment card).
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 8, 8, W - 16, cardBottom - 8, 40);
+  ctx.fill();
+
+  // The tail: a small triangle dropping from the bubble's lower edge toward Fox.
+  const tx = W / 2;
+  ctx.beginPath();
+  ctx.moveTo(tx - 58, cardBottom - 4);
+  ctx.lineTo(tx + 58, cardBottom - 4);
+  ctx.lineTo(tx, H - 6);
+  ctx.closePath();
+  ctx.fillStyle = "#fbf3dd";
+  ctx.fill();
+
+  // Outline the body, then the two slanted tail edges, in the gold border color.
+  ctx.lineWidth = 11;
+  ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 8, 8, W - 16, cardBottom - 8, 40);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(tx - 58, cardBottom - 4);
+  ctx.lineTo(tx, H - 6);
+  ctx.lineTo(tx + 58, cardBottom - 4);
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+
+  // Greeting title.
+  ctx.fillStyle = "#5b3a24";
+  ctx.font = "bold 54px sans-serif";
+  ctx.fillText(title, W / 2, 44);
+
+  // Body, wrapped and big enough to read at arm's length.
+  ctx.fillStyle = "#3a3326";
+  ctx.font = "38px sans-serif";
+  wrapText(ctx, body, W / 2, 140, W - 140, 50);
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
 // ----------------------------------------------------------------------------
 // SKY + LIGHTS
 // ----------------------------------------------------------------------------
