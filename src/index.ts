@@ -1616,7 +1616,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // The placeholder INSIDE a stop: a title/description panel and one big button.
     PANEL_POS: [0, 1.72, 3.3] as [number, number, number], // ahead of the spawn, kid eye height
     PANEL_W: 2.1,            // description panel width (metres)
-    BTN_POS: [0, 0.92, 3.45] as [number, number, number],  // the Finish button, lower and a touch nearer
+    BTN_POS: [1.7, 0.9, 3.45] as [number, number, number],  // the Finish button, to the lower-RIGHT so the model stays in view
     BTN_W: 1.3,              // button width (metres)
     BTN_H: 0.36,             // button height (metres)
     BTN_HOVER_SCALE: 1.06,   // gentle grow while pointed at
@@ -1868,10 +1868,13 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     INFO_W: 2.3,            // setup / closing panel width (m)
     Q_W: 2.3,              // question card width (m)
     READOUT_W: 2.3,        // interim readout width (m)
-    SETUP_PANEL_POS: [0, 1.95, 3.3] as [number, number, number],
+    // The panels ride ABOVE the build and the buttons BELOW it, so the data
+    // center the student is assembling is never hidden behind a box. The model
+    // tops out near eye height, so a panel centered at ~2.3 clears it.
+    SETUP_PANEL_POS: [0, 2.3, 3.3] as [number, number, number],
     Q_PANEL_POS: [0, 2.34, 3.3] as [number, number, number],   // up top, cards below it
-    READOUT_PANEL_POS: [0, 1.95, 3.3] as [number, number, number],
-    CLOSE_PANEL_POS: [0, 1.85, 3.3] as [number, number, number],
+    READOUT_PANEL_POS: [0, 2.3, 3.3] as [number, number, number],
+    CLOSE_PANEL_POS: [0, 2.3, 3.3] as [number, number, number],
     CARD_W: 2.5,           // option card width (m)
     CARD_H: 0.44,          // option card height (m)
     CARD_X: 0,             // option cards are centered in front of the student
@@ -1880,7 +1883,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     CARD_Z: 3.28,          // option cards distance in front of the spawn
     BTN_W: 1.6,            // Start / Next button size (m)
     BTN_H: 0.34,
-    BTN_POS: [0, 0.9, 3.4] as [number, number, number],
+    BTN_POS: [1.7, 0.9, 3.4] as [number, number, number], // lower-RIGHT, clear of the centered model AND the centered option cards
     HOVER_SCALE: 1.06,     // gentle grow while pointed at
     PRESS_SCALE: 0.95,     // quick squish on press
     READOUT_HOLD_MS: 900,  // keep the readout up this long to read BEFORE Next appears
