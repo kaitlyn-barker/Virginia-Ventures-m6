@@ -359,6 +359,87 @@ const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
       },
     ],
   },
+
+  // ---- Modern Farm, Shenandoah Valley (decision segment). Same shape as the others:
+  // plant the crops, decide how to water them, then bring in and sell the harvest.
+  // Farming did not disappear in Virginia, it got smarter; the strong picks use new
+  // technology and THRIVE, the old wasteful ways STRUGGLE, and the small local choice
+  // is NEUTRAL. The reusable runner and the meter math read this; nothing hardcoded.
+  farm: {
+    setup:
+      "You run a modern farm in the Shenandoah Valley. Farming did not disappear in Virginia, it got smarter. You make three choices to grow a great harvest using new technology.",
+    decisions: [
+      {
+        question: "How will you plant your crops?",
+        options: [
+          {
+            label: "Plant by hand the old way, guessing where the seeds go.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "It works, but seeds get wasted and the rows come out uneven.",
+          },
+          {
+            label: "Use a GPS-guided tractor to plant in perfect rows.",
+            effects: { ei: 3, it: 8, ps: 8 },
+            reaction: "thrive",
+            note: "No wasted seed, and every plant has room to grow.",
+          },
+          {
+            label: "Pack in way too many seeds to be safe.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Nothing is wasted, but the crowded plants choke each other.",
+          },
+        ],
+      },
+      {
+        question: "How will you know when the crops need water?",
+        options: [
+          {
+            label: "Water the whole field the same every day, just in case.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Simple, but you waste a lot of water on parts that do not need it.",
+          },
+          {
+            label: "Fly a sensor drone to find the dry spots, then water only those.",
+            effects: { ei: 0, it: 8, ps: 8 },
+            reaction: "thrive",
+            note: "You save water and the crops stay healthy.",
+          },
+          {
+            label: "Only water once plants already look like they are wilting.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "You save water at first, but by then the crops are hurt.",
+          },
+        ],
+      },
+      {
+        question: "How will you bring in the harvest and sell it?",
+        options: [
+          {
+            label: "Harvest slowly by hand and sell only at the local stand.",
+            effects: { ei: 3, it: -5, ps: 0 },
+            reaction: "neutral",
+            note: "A lot of work, and you reach only a few local buyers.",
+          },
+          {
+            label: "Use modern machines to harvest and sell to buyers across the country.",
+            effects: { ei: 8, it: 8, ps: 8 },
+            reaction: "thrive",
+            note: "A big harvest, and you reach far more customers.",
+          },
+          {
+            label: "Rush the harvest with machines but skip checking the crops.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Fast, but you ship bruised, low-quality produce.",
+          },
+        ],
+      },
+    ],
+  },
 };
 
 // ============================================================================
@@ -611,6 +692,142 @@ const TOURISM_VILLAGE = {
   ] as [number, number, string][],
   FLAG_POS: [-2.1, 0, -2.9] as [number, number, number], // flagpole on the green, behind the build
   WELL_POS: [1.6, 0, -2.7] as [number, number, number],  // a colonial well, behind the build
+};
+
+// ============================================================================
+// MODERN FARM — BUILD LAYOUT  (the field that assembles on the plot ahead)
+// The student arrives to a tilled, empty field plot (a raised soil bed, so it
+// clears the floating UI exactly like the Tech lot and Tourism green) and, choice
+// by choice, plants the crops, adds the watering tech, and brings in the harvest.
+// Positions are local to the staging group (shifted FORWARD toward the student).
+// The crop GRID and the swappable per-pick cues carry the "smart vs wasteful"
+// story. Warm valley palette. All motion stays slow and gentle (kids in a headset);
+// the actual blink/glow rates live in STAGING so the comfort rules sit in one place.
+// ============================================================================
+const FARM_BUILD = {
+  FORWARD: 1.8,            // bring the whole field toward the student (matches Tech/Tourism)
+  PLOT: [0, 0.64, -0.85] as [number, number, number], // plot/table-top center (own frame)
+  PLOT_W: 2.9,
+  PLOT_D: 2.5,
+  PLOT_THICK: 0.12,        // the field sits on a raised plot so it clears the floating UI
+  SOIL_W: 2.5,             // tilled soil bed on top of the plot
+  SOIL_D: 1.9,
+  SOIL_THICK: 0.05,
+  SOIL_Z: -0.9,            // soil center z on the plot top (own frame)
+  // the crop field: a tidy grid of plant clumps. Columns run across (x), rows
+  // recede toward the back (z). The hand/crowded cues reuse these anchors, jittered.
+  ROWS: 4,
+  PER_ROW: 6,
+  COL_X0: -1.0, COL_DX: 0.4,   // clump x = COL_X0 + col*COL_DX  (spans -1.0..1.0)
+  ROW_Z0: -1.55, ROW_DZ: 0.36, // clump z = ROW_Z0 + row*ROW_DZ  (recedes to the back)
+  PLANT_H: 0.18,           // a healthy plant's height
+  DRONE_HOVER_Y: 0.7,      // sensor drone height above the soil top
+  DRONE_SWEEP: 0.85,       // how far (m) the drone sweeps side to side over the field
+  DRONE_SWEEP_HZ: 0.16,    // slow sweep (cycles/sec) — calm, never darting
+  HARVEST_Z: -0.05,        // the harvest payoff sits at the front edge, toward "market"
+  COLOR: {
+    plot: "#6b4a2c",       // wooden plot frame / legs
+    soil: "#5b4128",       // dark tilled soil
+    crop: "#5fae4a",       // healthy crop green (matches the farm-green stop color)
+    cropChoke: "#8a9a3e",  // yellowed, choking crop (the overcrowded pick)
+    stem: "#3f7a32",
+    drone: "#d7dde2",      // drone body (light grey)
+    droneTrim: "#3a4650",
+    sensor: "#6fe0ff",     // drone sensor beam glow (lit, role "water")
+    greened: "#7fe06a",    // a freshly-greened dry spot (lit, role "water")
+    sprinkler: "#8b97a3",  // sprinkler post / head
+    puddle: "#4a8fc0",     // standing, wasted water (lit, role "water")
+    wilt: "#9a8a3c",       // a drooping, sickly plant (lit, role "water")
+    harvester: "#e0a52c",  // harvester body (farm yellow)
+    harvesterTrim: "#c2451f",
+    cab: "#2f3a44",        // dark cab glass
+    produce: "#e3b94a",    // golden harvested produce (lit, role "harvest")
+    bruised: "#7a6a4a",    // dull, bruised low-quality produce (lit, role "harvest")
+    truck: "#4a6f9a",      // market truck body
+    truckBed: "#6b5236",
+    headlight: "#fff2c0",  // truck marker light (lit, role "harvest")
+    stand: "#8a6a44",      // small local stand wood
+    standRoof: "#7a4a2c",
+    standSign: "#ffcf6b",  // stand lantern/sign (lit, role "harvest")
+    crate: "#9c6b3f",      // produce crates
+    wheel: "#23282d",
+  },
+};
+
+// ============================================================================
+// MODERN FARM — VALLEY BACKDROP  (the calm Shenandoah Valley around the build,
+// the outdoor counterpart to the Tech Office server room and the Tourism village).
+// Rolling green fields, the Blue Ridge mountains hazing the horizon, a red barn +
+// silo, a slowly-turning windmill, split-rail fences, hay bales, trees, and a few
+// drifting clouds. The barn echoes the hub landmark's colors. CLEARANCE RULE: tall
+// props stay at |x| >= CLEAR_X unless safely behind the build at z <= BACK_Z; low
+// props (the 0.36m fence, hay bales) only need to clear the build footprint. All
+// motion is slow and runs on the shared scene setInterval (never rAF). Tunable here.
+// ============================================================================
+const FARM_VALLEY = {
+  GROUND_Y: -0.06,        // grass top, a touch below the standing floor
+  CLEAR_X: 3.0,           // tall props keep |x| >= this (clear of the central corridor)
+  BACK_Z: -3.6,           // ...unless they sit behind the build at z <= this
+  FENCE_H: 0.36,          // low split-rail fence height (never blocks anything)
+  // gentle motion (cycles/sec + small amplitudes). Slow on purpose; nothing flashes.
+  WINDMILL_HZ: 0.06,      // slow blade spin
+  CLOUD_HZ: 0.015, CLOUD_DRIFT: 0.5,   // very slow cloud drift (m) before it loops
+  CROP_HZ: 0.12, CROP_SWAY: 0.025,     // distant cropland stripes sway
+  TREE_HZ: 0.12, TREE_SWAY: 0.04,
+  COLOR: {
+    grass: "#7bb24a",       // valley green underfoot
+    field: "#c8b25a",       // golden distant cropland
+    fieldAlt: "#9bbf52",    // green distant cropland
+    path: "#cdb98a",        // dirt lane
+    barn: "#bd3b2c",        // matches the hub Red Barn landmark
+    barnRoof: "#7c241a",
+    barnTrim: "#f1e7d0",
+    silo: "#d8d2c4",
+    siloCap: "#b9b1a0",
+    ridgeNear: "#6f86a8",   // Blue Ridge (nearer, a touch darker)
+    ridgeFar: "#8fa2bd",    // Blue Ridge (farther, hazier)
+    trunk: "#6b4f30",
+    leaf: "#4f8f43",
+    fence: "#caa877",       // split-rail wood fence (farm, not white)
+    hay: "#d8b552",         // round hay bale
+    windmillTower: "#9aa0a6",
+    windmillBlade: "#e7e2d4",
+    cloud: "#f3f1ea",
+  },
+  // Blue Ridge silhouette: wide, low, rounded ridges far behind everything.
+  // [x, z, width, height, colorKey]
+  RIDGES: [
+    [-2.8, -8.6, 7.2, 2.4, "ridgeFar"],
+    [2.6, -8.9, 7.6, 2.7, "ridgeFar"],
+    [-1.0, -7.6, 6.2, 1.9, "ridgeNear"],
+    [3.4, -7.4, 5.6, 1.7, "ridgeNear"],
+  ] as [number, number, number, number, string][],
+  // distant cropland stripes (low wide slabs that gently sway): [x, z, w, d, colorKey].
+  FIELDS: [
+    [-4.2, -4.6, 3.0, 2.2, "field"], [4.2, -4.6, 3.0, 2.2, "fieldAlt"],
+    [-3.6, -6.0, 3.4, 1.6, "fieldAlt"], [3.6, -6.0, 3.4, 1.6, "field"],
+    [0.0, -6.4, 3.2, 1.4, "field"],
+  ] as [number, number, number, number, string][],
+  // trees framing the valley (sides/back only, per the clearance rule): [x, z, scale].
+  TREES: [
+    [-4.9, -1.2, 1.1], [-4.6, 1.0, 0.95], [4.9, -1.2, 1.1], [4.6, 1.0, 0.95],
+    [-2.8, -5.0, 1.0], [2.9, -5.0, 1.0],
+  ] as [number, number, number][],
+  // low split-rail fences lining the field: [x, z, length, axis] (axis "x" or "z").
+  FENCES: [
+    [-2.5, -0.6, 4.6, "z"], [2.5, -0.6, 4.6, "z"], [0.0, -3.4, 4.8, "x"],
+  ] as [number, number, number, string][],
+  // round hay bales dotting the field edges (low, only clear the footprint): [x, z, scale].
+  HAY_BALES: [
+    [-2.7, 0.7, 1.0], [2.6, 0.8, 1.1], [-2.4, -2.0, 0.9], [2.5, -2.2, 1.0],
+  ] as [number, number, number][],
+  // a few slow drifting clouds: [x, y, z, scale].
+  CLOUDS: [
+    [-2.0, 4.0, -7.0, 1.2], [1.6, 4.4, -8.0, 1.5], [3.6, 4.1, -6.4, 1.0],
+  ] as [number, number, number, number][],
+  BARN_POS: [-3.8, 0, -1.2] as [number, number, number],   // red barn to the left
+  SILO_POS: [-3.0, 0, -1.7] as [number, number, number],   // silo beside the barn
+  WINDMILL_POS: [3.6, 0, -1.7] as [number, number, number], // a wind pump to the right
 };
 
 // ============================================================================
@@ -2437,6 +2654,177 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     return { group: g, tick };
   }
 
+  // ---- Modern Farm: a calm Shenandoah Valley wrapped around the build, the outdoor
+  // counterpart to the Tech Office server room and the Tourism village. Rolling green
+  // underfoot, the Blue Ridge mountains hazing the horizon, distant cropland stripes,
+  // a red barn + silo (echoing the hub landmark), a slowly turning windmill, split-rail
+  // fences, hay bales, trees, and a few drifting clouds. Everything obeys FARM_VALLEY's
+  // clearance rule (tall props at |x| >= CLEAR_X unless behind the build at z <= BACK_Z;
+  // low props just clear the footprint), so the valley never sits in front of the panels,
+  // the build spot, or the assembling field. Same { group, tick } contract the server
+  // room and village use; the caller ticks it on setInterval (rAF pauses in the headset). ----
+  function buildFarmStopScene(): { group: Group; tick: (clock: number) => void } {
+    const V = FARM_VALLEY;
+    const C = V.COLOR;
+    const g = new Group();
+    const swayers: { mesh: any; baseX: number; amp: number; phase: number }[] = [];
+    const clouds: { g: Group; baseX: number; phase: number }[] = [];
+    const fans: { g: Group }[] = [];
+
+    // the valley floor + a dirt lane leading from the student up into the farm.
+    const grass = meshBox(16, 0.12, 16, C.grass);
+    grass.position.set(0, V.GROUND_Y, 0.5);
+    g.add(grass);
+    const lane = meshBox(1.6, 0.02, 9, C.path);
+    lane.position.set(0.2, 0.01, 3.6);
+    g.add(lane);
+
+    // the Blue Ridge: wide, low, rounded ridges sunk into the horizon (a flattened
+    // sphere shows just its dome, so it reads as a soft mountain line, never a hard edge).
+    for (const r of V.RIDGES) {
+      const ridge = meshSphere(1, (C as any)[r[4]]);
+      ridge.scale.set(r[2] / 2, r[3], 1.6);
+      ridge.position.set(r[0], V.GROUND_Y - r[3] * 0.45, r[1]);
+      g.add(ridge);
+    }
+
+    // distant cropland stripes: low wide slabs that drift a touch in the wind.
+    for (const f of V.FIELDS) {
+      const slab = meshBox(f[2], 0.04, f[3], (C as any)[f[4]]);
+      slab.position.set(f[0], V.GROUND_Y + 0.02, f[1]);
+      g.add(slab);
+      swayers.push({ mesh: slab, baseX: f[0], amp: V.CROP_SWAY, phase: f[0] * 0.6 + f[1] * 0.2 });
+    }
+
+    // the red barn (matching the hub landmark): body + roof + white door & trim beam.
+    {
+      const x = V.BARN_POS[0], z = V.BARN_POS[2];
+      const body = meshBox(1.4, 0.95, 1.2, C.barn);
+      body.position.set(x, 0.475, z);
+      g.add(body);
+      const roof = meshBox(1.55, 0.28, 1.32, C.barnRoof);
+      roof.position.set(x, 1.05, z);
+      g.add(roof);
+      const fz = z + 0.62;
+      const door = meshBox(0.42, 0.55, 0.02, C.barnTrim);
+      door.position.set(x, 0.275, fz);
+      g.add(door);
+      const beamH = meshBox(0.42, 0.05, 0.02, C.barn);
+      beamH.position.set(x, 0.36, fz + 0.005);
+      g.add(beamH);
+      const beamV = meshBox(0.05, 0.55, 0.02, C.barn);
+      beamV.position.set(x, 0.275, fz + 0.005);
+      g.add(beamV);
+    }
+    // a grain silo beside the barn: a tall cylinder with a domed cap.
+    {
+      const x = V.SILO_POS[0], z = V.SILO_POS[2];
+      const silo = meshCyl(0.32, 0.32, 1.3, C.silo);
+      silo.position.set(x, 0.65, z);
+      g.add(silo);
+      const cap = meshSphere(0.32, C.siloCap);
+      cap.scale.y = 0.6;
+      cap.position.set(x, 1.3, z);
+      g.add(cap);
+    }
+    // a classic farm windmill: a tapered tower with a multi-blade fan that turns
+    // slowly, plus a tail vane. The fan is a child Group we spin in tick().
+    {
+      const x = V.WINDMILL_POS[0], z = V.WINDMILL_POS[2];
+      const tower = meshCyl(0.05, 0.15, 2.2, C.windmillTower);
+      tower.position.set(x, 1.1, z);
+      g.add(tower);
+      const fan = new Group();
+      fan.position.set(x, 2.2, z + 0.12);
+      const hub = meshCyl(0.06, 0.06, 0.06, C.windmillTower);
+      hub.rotation.x = Math.PI / 2;
+      fan.add(hub);
+      for (let i = 0; i < 7; i++) {
+        const blade = meshBox(0.62, 0.07, 0.015, C.windmillBlade);
+        blade.rotation.z = (i / 7) * Math.PI * 2;
+        fan.add(blade);
+      }
+      g.add(fan);
+      fans.push({ g: fan });
+      // the tail vane behind the tower.
+      const boom = meshBox(0.5, 0.02, 0.02, C.windmillTower);
+      boom.position.set(x, 2.2, z - 0.28);
+      g.add(boom);
+      const vane = meshBox(0.02, 0.22, 0.26, C.windmillBlade);
+      vane.position.set(x, 2.2, z - 0.5);
+      g.add(vane);
+    }
+
+    // leafy trees framing the valley: a trunk + a canopy that sways slowly.
+    for (const sp of V.TREES) {
+      const s = sp[2];
+      const trunk = meshCyl(0.1 * s, 0.14 * s, 1.1 * s, C.trunk);
+      trunk.position.set(sp[0], 0.55 * s, sp[1]);
+      g.add(trunk);
+      const canopy = meshSphere(0.68 * s, C.leaf);
+      canopy.position.set(sp[0], 1.25 * s, sp[1]);
+      g.add(canopy);
+      swayers.push({ mesh: canopy, baseX: sp[0], amp: V.TREE_SWAY * s, phase: sp[0] * 0.7 + sp[1] * 0.3 });
+    }
+
+    // low split-rail wood fences (three rails + posts) lining the field's edges.
+    for (const fc of V.FENCES) {
+      const fx = fc[0], fz = fc[1], len = fc[2], axis = fc[3];
+      for (const ry of [V.FENCE_H * 0.4, V.FENCE_H * 0.7, V.FENCE_H]) {
+        const rail = axis === "z" ? meshBox(0.05, 0.04, len, C.fence) : meshBox(len, 0.04, 0.05, C.fence);
+        rail.position.set(fx, ry, fz);
+        g.add(rail);
+      }
+      const n = Math.max(2, Math.round(len / 1.0));
+      for (let i = 0; i <= n; i++) {
+        const f = i / n - 0.5;
+        const post = meshBox(0.07, V.FENCE_H + 0.08, 0.07, C.fence);
+        post.position.set(axis === "x" ? fx + f * len : fx, (V.FENCE_H + 0.08) / 2, axis === "z" ? fz + f * len : fz);
+        g.add(post);
+      }
+    }
+
+    // round hay bales (a cylinder laid on its side) dotting the field edges.
+    for (const hb of V.HAY_BALES) {
+      const s = hb[2];
+      const bale = meshCyl(0.22 * s, 0.22 * s, 0.4 * s, C.hay);
+      bale.rotation.z = Math.PI / 2;
+      bale.position.set(hb[0], 0.22 * s, hb[1]);
+      g.add(bale);
+    }
+
+    // a few soft clouds (clusters of white spheres) drifting slowly across the sky.
+    for (const cl of V.CLOUDS) {
+      const cg = new Group();
+      for (const off of [[-0.5, 0, 0, 0.5], [0.2, 0.1, 0, 0.6], [0.7, -0.05, 0.1, 0.45]]) {
+        const puff = meshSphere(off[3] * cl[3], C.cloud);
+        puff.position.set(off[0] * cl[3], off[1] * cl[3], off[2] * cl[3]);
+        cg.add(puff);
+      }
+      cg.position.set(cl[0], cl[1], cl[2]);
+      g.add(cg);
+      clouds.push({ g: cg, baseX: cl[0], phase: cl[0] + cl[2] });
+    }
+
+    // The gentle life: canopies + distant fields drift, the windmill fan turns slowly,
+    // clouds drift and loop. All slow, nothing flashes; the caller ticks on setInterval.
+    function tick(clock: number) {
+      const t = clock / 1000;
+      for (const s of swayers) {
+        s.mesh.position.x = s.baseX + Math.sin(2 * Math.PI * V.TREE_HZ * t + s.phase) * s.amp;
+      }
+      for (const fn of fans) {
+        fn.g.rotation.z = 2 * Math.PI * V.WINDMILL_HZ * t;
+      }
+      for (const c of clouds) {
+        const drift = ((V.CLOUD_HZ * t + c.phase) % 1) - 0.5;
+        c.g.position.x = c.baseX + drift * V.CLOUD_DRIFT * 8;
+      }
+    }
+
+    return { group: g, tick };
+  }
+
   // Each stop owns a calm BACKDROP scene, registered here as { group, tick }: the
   // group shows/hides with the stop, and ONE shared loop ticks whichever stop is
   // active. Generic on purpose — adding a stop is just another registerStopScene
@@ -2451,6 +2839,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }
   registerStopScene("tech", buildTechStopScene());       // the Tech Office server room
   registerStopScene("tourism", buildTourismStopScene()); // the Colonial Williamsburg green
+  registerStopScene("farm", buildFarmStopScene());       // the Shenandoah Valley farm
 
   // One shared loop gently animates whichever stop's backdrop is showing (server
   // room dots/screens, or the Tourism treeline/flag). setInterval, not rAF (rAF
@@ -2489,6 +2878,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const stopStagings: { [id: string]: StopStaging } = {};
   type GlowRole = "building" | "power" | "runtime";
   type TourismRole = "booth" | "attraction" | "site"; // the Tourism build's three stages
+  type FarmRole = "field" | "water" | "harvest";       // the Modern Farm's three stages
 
   // ---- Tech Office: a data center built piece by piece on the lot ahead of the
   // student. Decision 1 raises the BUILDING (with a cue for the site chosen),
@@ -3111,6 +3501,350 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     return { group, reset, addStage, tick };
   }
 
+  // ---- Modern Farm: a field built up choice by choice on the plot ahead of the
+  // student. The tilled, empty plot is there from arrival. Decision 1 (planting)
+  // PLANTS the field — neat green rows, a patchy uneven field, or overcrowded clumps.
+  // Decision 2 (watering) adds the WATERING tech and the field responds — a sensor
+  // drone sweeps over and greens the dry spots, sprinklers leave wasteful puddles, or
+  // the crops droop from waiting too long. Decision 3 (harvest) shows the PAYOFF — a
+  // harvester with a full crop and trucks to market, a small local stand, or a bruised
+  // low-quality haul. Each stage then THRIVES (lush steady glow), STRUGGLES (dim uneven
+  // flicker), or runs NEUTRAL (a quiet mid glow). Same { group, reset, addStage, tick }
+  // contract Tech and Tourism use, so the runner drives it unchanged. All motion stays
+  // slow and gentle (kids in a headset). ----
+  function buildFarmStaging(): StopStaging {
+    const F = FARM_BUILD;
+    const C = F.COLOR;
+    const group = new Group();
+    group.position.z = F.FORWARD; // bring the field toward the student
+
+    // role-tagged animated lights (intensity follows each stage's reaction).
+    const glowParts: { mesh: any; role: FarmRole }[] = [];
+    // each stage's reaction (null until built) + its ease-in progress.
+    const reaction: { field: StageReaction | null; water: StageReaction | null; harvest: StageReaction | null } =
+      { field: null, water: null, harvest: null };
+    const appear = { field: 0, water: 0, harvest: 0 };
+    let droneActive = false; // true only for the drone watering pick (it sweeps in tick)
+
+    // register a mesh as an animated light (driven by its stage's reaction).
+    function lit(mesh: any, color: string, role: FarmRole) {
+      mesh.material.emissive = new Color(color);
+      mesh.material.emissiveIntensity = 0;
+      glowParts.push({ mesh, role });
+      return mesh;
+    }
+
+    // ---- the plot (a raised table) + the tilled soil bed, both there from arrival ----
+    const plot = meshBox(F.PLOT_W, F.PLOT_THICK, F.PLOT_D, C.plot);
+    plot.position.set(F.PLOT[0], F.PLOT[1], F.PLOT[2]);
+    group.add(plot);
+    const plotTop = F.PLOT[1] + F.PLOT_THICK / 2;
+    const plotBottom = F.PLOT[1] - F.PLOT_THICK / 2;
+    for (const lx of [-1.2, 1.2]) {
+      for (const lz of [-1.0, 1.0]) {
+        const leg = meshBox(0.12, plotBottom, 0.12, C.plot);
+        leg.position.set(lx, plotBottom / 2, F.PLOT[2] + lz);
+        group.add(leg);
+      }
+    }
+    const soil = meshBox(F.SOIL_W, F.SOIL_THICK, F.SOIL_D, C.soil);
+    soil.position.set(0, plotTop + F.SOIL_THICK / 2, F.SOIL_Z);
+    group.add(soil);
+    const soilTop = plotTop + F.SOIL_THICK;
+    // furrow lines across the soil, so the empty bed already reads as "tilled and ready".
+    for (let r = 0; r < F.ROWS; r++) {
+      const fz = F.ROW_Z0 + r * F.ROW_DZ;
+      const furrow = meshBox(F.SOIL_W * 0.92, 0.012, 0.04, "#4a3420");
+      furrow.position.set(0, soilTop + 0.006, fz);
+      group.add(furrow);
+    }
+
+    const clumpX = (col: number) => F.COL_X0 + col * F.COL_DX;
+    const clumpZ = (row: number) => F.ROW_Z0 + row * F.ROW_DZ;
+    // a single plant: a short stem + a leafy top (the lit part, so it reacts). A tilt
+    // leans it over for the drooping/wilted look.
+    function plant(parent: Group, x: number, z: number, h: number, topColor: string, role: FarmRole, tilt = 0) {
+      const stemH = h * 0.5;
+      const stem = meshCyl(0.012, 0.018, stemH, C.stem);
+      stem.position.set(x, soilTop + stemH / 2, z);
+      stem.rotation.z = tilt;
+      parent.add(stem);
+      const topH = h * 0.62;
+      const top = meshCone(0.07, topH, topColor);
+      top.position.set(x + Math.sin(tilt) * h * 0.4, soilTop + stemH + topH / 2 - 0.02, z);
+      top.rotation.z = tilt;
+      parent.add(lit(top, topColor, role));
+    }
+
+    // =================== STAGE 1: the planted field (3 swappable cues) ============
+    const fieldStage = new Group();
+    fieldStage.visible = false;
+    group.add(fieldStage);
+    // cue: GPS tractor — a full, tidy grid of even, healthy rows.
+    const cueRows = new Group();
+    fieldStage.add(cueRows);
+    for (let r = 0; r < F.ROWS; r++) {
+      for (let col = 0; col < F.PER_ROW; col++) {
+        plant(cueRows, clumpX(col), clumpZ(r), F.PLANT_H, C.crop, "field");
+      }
+    }
+    // cue: by hand — the same field but patchy: gaps, jitter, and uneven heights.
+    const cueHand = new Group();
+    fieldStage.add(cueHand);
+    for (let r = 0; r < F.ROWS; r++) {
+      for (let col = 0; col < F.PER_ROW; col++) {
+        if ((col * 2 + r) % 3 === 0) continue; // ~a third of the spots come up empty
+        const dx = (((col * 7 + r * 3) % 5) - 2) * 0.03;
+        const dz = (((col * 3 + r * 5) % 5) - 2) * 0.03;
+        const hh = F.PLANT_H * (0.65 + ((col + r) % 3) * 0.2);
+        plant(cueHand, clumpX(col) + dx, clumpZ(r) + dz, hh, C.crop, "field");
+      }
+    }
+    // cue: too many seeds — a dense, packed grid (half spacing) of choked, yellowed plants.
+    const cueCrowded = new Group();
+    fieldStage.add(cueCrowded);
+    for (let r = 0; r < F.ROWS; r++) {
+      for (let col = 0; col < F.PER_ROW * 2 - 1; col++) {
+        const x = F.COL_X0 + col * (F.COL_DX / 2);
+        const hh = F.PLANT_H * (0.7 + ((col * 3 + r) % 3) * 0.12);
+        plant(cueCrowded, x, clumpZ(r), hh, C.cropChoke, "field");
+      }
+    }
+    cueRows.visible = cueHand.visible = cueCrowded.visible = false;
+
+    // =================== STAGE 2: the watering tech (3 swappable cues) ============
+    const waterStage = new Group();
+    waterStage.visible = false;
+    group.add(waterStage);
+    // cue: sensor drone — a quadcopter that hovers and sweeps, greening the dry spots.
+    const cueDrone = new Group();
+    waterStage.add(cueDrone);
+    const droneGroup = new Group();
+    const droneBaseX = 0;
+    const droneZ = F.SOIL_Z;
+    {
+      const body = meshBox(0.18, 0.06, 0.18, C.drone);
+      droneGroup.add(body);
+      for (const [ax, az] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]] as [number, number][]) {
+        const arm = meshBox(0.04, 0.02, 0.04, C.droneTrim);
+        arm.position.set(ax, 0.02, az);
+        droneGroup.add(arm);
+        const rotor = meshCyl(0.06, 0.06, 0.012, C.droneTrim);
+        rotor.position.set(ax, 0.05, az);
+        droneGroup.add(rotor);
+      }
+      const eye = meshSphere(0.035, C.sensor);
+      eye.position.set(0, -0.04, 0);
+      droneGroup.add(lit(eye, C.sensor, "water"));
+      const beam = meshCone(0.07, 0.3, C.sensor);
+      beam.rotation.x = Math.PI; // point the scanning beam straight down at the field
+      beam.position.set(0, -0.2, 0);
+      droneGroup.add(lit(beam, C.sensor, "water"));
+    }
+    droneGroup.position.set(droneBaseX, soilTop + F.DRONE_HOVER_Y, droneZ);
+    cueDrone.add(droneGroup);
+    // the freshly-greened dry spots the drone found: small bright disks on the soil.
+    for (const sp of [[-0.7, -1.3], [0.5, -1.45], [-0.2, -0.7], [0.8, -0.9], [-0.9, -0.6]]) {
+      const patch = meshCyl(0.13, 0.13, 0.014, C.greened);
+      patch.position.set(sp[0], soilTop + 0.012, sp[1]);
+      cueDrone.add(lit(patch, C.greened, "water"));
+    }
+    // cue: water the whole field — sprinklers with wasteful standing puddles.
+    const cueSprinklers = new Group();
+    waterStage.add(cueSprinklers);
+    for (const px of [-0.7, 0, 0.7]) {
+      const post = meshCyl(0.018, 0.018, 0.28, C.sprinkler);
+      post.position.set(px, soilTop + 0.14, -0.9);
+      cueSprinklers.add(post);
+      const head = meshSphere(0.04, C.sprinkler);
+      head.position.set(px, soilTop + 0.29, -0.9);
+      cueSprinklers.add(head);
+    }
+    for (const pd of [[-0.6, -1.2, 0.2], [0.4, -1.4, 0.26], [-0.1, -0.7, 0.3], [0.7, -0.9, 0.22], [0.0, -1.6, 0.24]]) {
+      const puddle = meshCyl(pd[2], pd[2], 0.012, C.puddle);
+      puddle.position.set(pd[0], soilTop + 0.01, pd[1]);
+      cueSprinklers.add(lit(puddle, C.puddle, "water"));
+    }
+    // cue: wait until they wilt — a scatter of drooping, sickly plants.
+    const cueWilt = new Group();
+    waterStage.add(cueWilt);
+    for (const wp of [[-0.7, -1.3], [0.2, -1.5], [0.6, -1.0], [-0.3, -0.8], [0.9, -1.4], [-0.9, -1.0]]) {
+      plant(cueWilt, wp[0], wp[1], F.PLANT_H * 0.95, C.wilt, "water", 0.6);
+    }
+    cueDrone.visible = cueSprinklers.visible = cueWilt.visible = false;
+
+    // =================== STAGE 3: the harvest payoff (3 swappable cues) ===========
+    const harvestStage = new Group();
+    harvestStage.visible = false;
+    group.add(harvestStage);
+    const hz = F.HARVEST_Z;
+    function wheel(parent: Group, x: number, z: number, r: number) {
+      const w = meshCyl(r, r, 0.06, C.wheel);
+      w.rotation.z = Math.PI / 2; // lay the wheel on its side (axis along x)
+      w.position.set(x, soilTop + r, z);
+      parent.add(w);
+    }
+    function produceHeap(parent: Group, cx: number, cz: number, color: string, role: FarmRole) {
+      for (const o of [[0, 0.07, 0], [0.1, 0.06, 0.05], [-0.1, 0.06, -0.04], [0.05, 0.13, -0.02], [-0.06, 0.12, 0.06], [0, 0.18, 0.0]]) {
+        const ball = meshSphere(0.06, color);
+        ball.position.set(cx + o[0], soilTop + o[1], cz + o[2]);
+        parent.add(lit(ball, color, role));
+      }
+    }
+    // cue: modern machines — a harvester, a full golden crop, and trucks to market.
+    const cueMachines = new Group();
+    harvestStage.add(cueMachines);
+    {
+      // the harvester, parked at the field's left, header toward the rows.
+      const hx = -0.85;
+      const body = meshBox(0.46, 0.26, 0.36, C.harvester);
+      body.position.set(hx, soilTop + 0.07 + 0.13, hz - 0.1);
+      cueMachines.add(body);
+      const cab = meshBox(0.22, 0.2, 0.24, C.cab);
+      cab.position.set(hx, soilTop + 0.07 + 0.36, hz - 0.16);
+      cueMachines.add(cab);
+      const header = meshBox(0.6, 0.12, 0.14, C.harvesterTrim);
+      header.position.set(hx, soilTop + 0.1, hz - 0.32);
+      cueMachines.add(header);
+      wheel(cueMachines, hx - 0.2, hz + 0.04, 0.09);
+      wheel(cueMachines, hx + 0.2, hz + 0.04, 0.09);
+      wheel(cueMachines, hx - 0.2, hz - 0.22, 0.07);
+      wheel(cueMachines, hx + 0.2, hz - 0.22, 0.07);
+      produceHeap(cueMachines, hx + 0.05, hz + 0.18, C.produce, "harvest"); // the full crop beside it
+      // two market trucks lined up heading toward the student (toward "market", +z).
+      for (const tx of [0.55, 1.0]) {
+        const tz = hz + 0.2;
+        const bed = meshBox(0.32, 0.14, 0.46, C.truckBed);
+        bed.position.set(tx, soilTop + 0.07 + 0.07, tz);
+        cueMachines.add(bed);
+        const tcab = meshBox(0.3, 0.18, 0.2, C.truck);
+        tcab.position.set(tx, soilTop + 0.07 + 0.13, tz + 0.32);
+        cueMachines.add(tcab);
+        const headlight = meshBox(0.22, 0.05, 0.02, C.headlight);
+        headlight.position.set(tx, soilTop + 0.07 + 0.08, tz + 0.43);
+        cueMachines.add(lit(headlight, C.headlight, "harvest"));
+        produceHeap(cueMachines, tx, tz - 0.02, C.produce, "harvest"); // loaded with the harvest
+        wheel(cueMachines, tx - 0.16, tz - 0.12, 0.07);
+        wheel(cueMachines, tx + 0.16, tz - 0.12, 0.07);
+        wheel(cueMachines, tx - 0.16, tz + 0.2, 0.07);
+        wheel(cueMachines, tx + 0.16, tz + 0.2, 0.07);
+      }
+    }
+    // cue: by hand to the local stand — a small wooden stand with a little produce.
+    const cueStand = new Group();
+    harvestStage.add(cueStand);
+    {
+      const sx = 0.1;
+      const counter = meshBox(0.6, 0.1, 0.3, C.stand);
+      counter.position.set(sx, soilTop + 0.28, hz + 0.1);
+      cueStand.add(counter);
+      for (const lx of [-0.26, 0.26]) {
+        const leg = meshBox(0.05, 0.28, 0.05, C.stand);
+        leg.position.set(sx + lx, soilTop + 0.14, hz + 0.1);
+        cueStand.add(leg);
+      }
+      const roof = meshBox(0.72, 0.05, 0.36, C.standRoof);
+      roof.position.set(sx, soilTop + 0.52, hz + 0.06);
+      roof.rotation.x = -0.12;
+      cueStand.add(roof);
+      const sign = meshBox(0.34, 0.14, 0.02, C.standSign);
+      sign.position.set(sx, soilTop + 0.46, hz + 0.27);
+      cueStand.add(lit(sign, C.standSign, "harvest"));
+      // a small basket of produce on the counter.
+      produceHeap(cueStand, sx, hz + 0.1, C.produce, "harvest");
+    }
+    // cue: rush the harvest — a tipped crate and a small pile of dull, bruised produce.
+    const cueRush = new Group();
+    harvestStage.add(cueRush);
+    {
+      const rx = 0.1;
+      const crate = meshBox(0.34, 0.22, 0.26, C.crate);
+      crate.position.set(rx - 0.2, soilTop + 0.08, hz + 0.1);
+      crate.rotation.z = 0.5; // knocked over
+      cueRush.add(crate);
+      // a small, low heap of bruised produce spilled out.
+      for (const o of [[0, 0.05, 0], [0.12, 0.05, 0.05], [0.2, 0.05, -0.04], [0.08, 0.05, 0.12], [0.26, 0.05, 0.07]]) {
+        const ball = meshSphere(0.055, C.bruised);
+        ball.position.set(rx + o[0], soilTop + o[1], hz + 0.1 + o[2]);
+        cueRush.add(lit(ball, C.bruised, "harvest"));
+      }
+    }
+    cueMachines.visible = cueStand.visible = cueRush.visible = false;
+
+    const stages: FarmRole[] = ["field", "water", "harvest"];
+    const stageGroup: { [k in FarmRole]: Group } = { field: fieldStage, water: waterStage, harvest: harvestStage };
+
+    // a slow, uneven 0..1 wave for the "struggling/troubled" look — never a strobe.
+    function flicker(t: number) {
+      const w = 0.6 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_A * t)
+              + 0.4 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_B * t + 1.3);
+      return 0.5 + 0.5 * w;
+    }
+
+    // ---- the three calls the runner drives ----
+    function reset() {
+      reaction.field = reaction.water = reaction.harvest = null;
+      appear.field = appear.water = appear.harvest = 0;
+      droneActive = false;
+      fieldStage.visible = waterStage.visible = harvestStage.visible = false;
+      fieldStage.position.y = waterStage.position.y = harvestStage.position.y = 0;
+      cueRows.visible = cueHand.visible = cueCrowded.visible = false;
+      cueDrone.visible = cueSprinklers.visible = cueWilt.visible = false;
+      cueMachines.visible = cueStand.visible = cueRush.visible = false;
+      droneGroup.position.x = droneBaseX;
+      for (const gp of glowParts) gp.mesh.material.emissiveIntensity = 0;
+    }
+
+    function addStage(i: number, optionIndex: number, r: StageReaction) {
+      if (i === 0) {
+        cueHand.visible = optionIndex === 0;    // option 0 = plant by hand (patchy)
+        cueRows.visible = optionIndex === 1;    // option 1 = GPS tractor (tidy rows)
+        cueCrowded.visible = optionIndex === 2; // option 2 = too many seeds (choked)
+        reaction.field = r; appear.field = 0; fieldStage.visible = true;
+      } else if (i === 1) {
+        cueSprinklers.visible = optionIndex === 0; // option 0 = water the whole field
+        cueDrone.visible = optionIndex === 1;      // option 1 = sensor drone
+        cueWilt.visible = optionIndex === 2;       // option 2 = wait until they wilt
+        droneActive = optionIndex === 1;
+        reaction.water = r; appear.water = 0; waterStage.visible = true;
+      } else if (i === 2) {
+        cueStand.visible = optionIndex === 0;    // option 0 = by hand to the local stand
+        cueMachines.visible = optionIndex === 1; // option 1 = modern machines to market
+        cueRush.visible = optionIndex === 2;     // option 2 = rush (bruised haul)
+        reaction.harvest = r; appear.harvest = 0; harvestStage.visible = true;
+      }
+    }
+
+    function tick(clock: number) {
+      const t = clock / 1000;
+      // ease each freshly-added stage up into place (a gentle rise, no pop).
+      for (const key of stages) {
+        if (reaction[key] && appear[key] < 1) {
+          appear[key] = Math.min(1, appear[key] + STAGING.TICK_MS / STAGING.APPEAR_MS);
+        }
+        const e = 1 - (1 - appear[key]) * (1 - appear[key]); // ease-out
+        stageGroup[key].position.y = (1 - e) * -STAGING.APPEAR_RISE;
+      }
+      // drive each role-tagged light to match its stage's reaction.
+      for (const gp of glowParts) {
+        const r = reaction[gp.role];
+        if (!r) continue;
+        let v: number;
+        if (r === "thrive") v = STAGING.THRIVE_GLOW + STAGING.THRIVE_PULSE_AMP * Math.sin(2 * Math.PI * STAGING.THRIVE_PULSE_HZ * t);
+        else if (r === "neutral") v = STAGING.NEUTRAL_GLOW;
+        else v = STAGING.STRUGGLE_GLOW_MIN + (STAGING.STRUGGLE_GLOW_MAX - STAGING.STRUGGLE_GLOW_MIN) * flicker(t);
+        gp.mesh.material.emissiveIntensity = v * appear[gp.role];
+      }
+      // the sensor drone sweeps slowly side to side over the field as it scans.
+      if (droneActive) {
+        droneGroup.position.x = droneBaseX + Math.sin(2 * Math.PI * F.DRONE_SWEEP_HZ * t) * F.DRONE_SWEEP;
+      }
+    }
+
+    reset();
+    return { group, reset, addStage, tick };
+  }
+
   const techStaging = buildTechStaging();
   stopScenes["tech"].add(techStaging.group);
   stopStagings["tech"] = techStaging;
@@ -3120,6 +3854,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const tourismStaging = buildTourismStaging();
   stopScenes["tourism"].add(tourismStaging.group);
   stopStagings["tourism"] = tourismStaging;
+
+  // Modern Farm: the field that plants, waters, and harvests itself on the plot as
+  // the student decides. Same { group, reset, addStage, tick } contract the runner drives.
+  const farmStaging = buildFarmStaging();
+  stopScenes["farm"].add(farmStaging.group);
+  stopStagings["farm"] = farmStaging;
 
   // One shared loop animates whichever stop's staging is active. setInterval, not
   // rAF (which pauses in the headset). Idle on the hub, where nothing is built.
