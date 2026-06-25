@@ -156,3 +156,110 @@ export function stopHum() {
   }
   humHandle = null;
 }
+
+// ----------------------------------------------------------------------------
+// VILLAGE AMBIENCE  —  the outdoor counterpart to the server-room hum: a soft
+// murmur of distant visitors (gently swelling) under a faint warm pad, plus the
+// occasional light bird chirp. Same approach as startHum: pure WebAudio drones
+// that loop until stopVillageAmbience(), so no rAF; the only timer is a slow
+// setInterval that sprinkles in birdsong. Soft and short on purpose (kids in a
+// headset), with a gentle fade in/out so it never pops. The caller starts it on
+// the student's first action in the stop (the AudioContext is unlocked by then).
+// ----------------------------------------------------------------------------
+let villageHandle: {
+  gain: GainNode;
+  sources: AudioScheduledSourceNode[];
+  birds: ReturnType<typeof setInterval>;
+} | null = null;
+const VILLAGE_LEVEL = 0.05; // master gain of the whole ambience (very soft)
+
+// a soft, quick two-note bird call (a little up-tick then a chirp down), pitch
+// varied each time so it never sounds mechanical. Routed through note() so it is
+// naturally short and quiet.
+function birdChirp() {
+  const base = 1700 + Math.random() * 1300;
+  note(base, 0.08, "sine", 0.035, 0, base * 1.16);
+  note(base * 1.12, 0.07, "sine", 0.03, 0.09, base * 0.9);
+  if (Math.random() < 0.5) note(base * 1.05, 0.06, "sine", 0.025, 0.18);
+}
+
+export function startVillageAmbience() {
+  const ctx = getCtx();
+  if (!ctx || villageHandle) return; // already running, or no audio
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(VILLAGE_LEVEL, ctx.currentTime + 1.2); // ease in
+  master.connect(ctx.destination);
+
+  const sources: AudioScheduledSourceNode[] = [];
+
+  // Soft murmur of visitors: looped white noise through a band-pass around the
+  // low-mid "chatter" range, kept faint.
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const murmur = ctx.createBufferSource();
+  murmur.buffer = buffer;
+  murmur.loop = true;
+  const bp = ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 500;
+  bp.Q.value = 0.7;
+  const mg = ctx.createGain();
+  mg.gain.value = 0.5;
+  murmur.connect(bp).connect(mg).connect(master);
+  murmur.start();
+  sources.push(murmur);
+
+  // a very slow swell on the murmur (an LFO on its gain), so the crowd gently ebbs
+  // and flows. Audio-rate scheduling, not rAF.
+  const lfo = ctx.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.value = 0.1; // very slow
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.18;
+  lfo.connect(lfoGain).connect(mg.gain);
+  lfo.start();
+  sources.push(lfo);
+
+  // a faint warm pad underneath, so the outdoors feels full, not hissy.
+  const pad = ctx.createOscillator();
+  pad.type = "sine";
+  pad.frequency.value = 110;
+  const pg = ctx.createGain();
+  pg.gain.value = 0.06;
+  pad.connect(pg).connect(master);
+  pad.start();
+  sources.push(pad);
+
+  // Light birdsong: an occasional soft chirp, sprinkled in on a slow setInterval
+  // (randomized so the spacing varies). Cleared in stopVillageAmbience.
+  const birds = setInterval(function () {
+    if (Math.random() < 0.5) birdChirp();
+  }, 3500);
+
+  villageHandle = { gain: master, sources, birds };
+}
+
+export function stopVillageAmbience() {
+  const ctx = getCtx();
+  if (!villageHandle || !ctx) return;
+  const { gain, sources, birds } = villageHandle;
+  clearInterval(birds);
+  const t = ctx.currentTime;
+  try {
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); // ease out
+  } catch {
+    // ignore: context may be closing
+  }
+  for (const s of sources) {
+    try {
+      s.stop(t + 0.7);
+    } catch {
+      // already stopped
+    }
+  }
+  villageHandle = null;
+}

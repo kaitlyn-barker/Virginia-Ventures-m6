@@ -35,7 +35,7 @@ import {
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
 import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
-import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum } from "./sfx";
+import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum, startVillageAmbience, stopVillageAmbience } from "./sfx";
 
 // ============================================================================
 // ECONOMIC CONSTANTS  (carried over; the stages read these in later prompts)
@@ -279,6 +279,86 @@ const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
       },
     ],
   },
+
+  // ---- Tourism Hub, Colonial Williamsburg (decision segment). Same shape as Tech:
+  // price the tickets, bring visitors in, then balance crowds against protecting the
+  // old buildings. Strong picks thrive, weak picks struggle, the safe-but-quiet pick
+  // is neutral. The reusable runner and the meter math read this; nothing hardcoded.
+  tourism: {
+    setup:
+      "You run a historic site in Colonial Williamsburg, where visitors come to see how Virginians lived long ago. You make three choices to welcome visitors and protect the site.",
+    decisions: [
+      {
+        question: "How will you price tickets?",
+        options: [
+          {
+            label: "Make them free.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Big happy crowds come, but with no ticket money you cannot keep the old buildings repaired.",
+          },
+          {
+            label: "Set a fair price.",
+            effects: { ei: 8, it: 0, ps: 8 },
+            reaction: "thrive",
+            note: "Plenty of visitors still come, and you earn enough to keep the site beautiful.",
+          },
+          {
+            label: "Charge a very high price.",
+            effects: { ei: 3, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Each ticket earns a lot, but few people can afford to come and the town feels left out.",
+          },
+        ],
+      },
+      {
+        question: "How will you bring visitors in?",
+        options: [
+          {
+            label: "Do nothing and hope they show up.",
+            effects: { ei: 0, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Almost no one finds the site.",
+          },
+          {
+            label: "Share the real history and hands-on experiences.",
+            effects: { ei: 8, it: 8, ps: 0 },
+            reaction: "thrive",
+            note: "People travel from far away for something authentic.",
+          },
+          {
+            label: "Build flashy fake attractions that ignore the real history.",
+            effects: { ei: 3, it: -5, ps: 0 },
+            reaction: "struggle",
+            note: "A crowd comes, but it cheapens what makes the place special.",
+          },
+        ],
+      },
+      {
+        question: "How will you handle crowds and the old buildings?",
+        options: [
+          {
+            label: "Let in huge crowds with no limits.",
+            effects: { ei: 8, it: 0, ps: -5 },
+            reaction: "struggle",
+            note: "Lots of money today, but the historic buildings get worn and damaged.",
+          },
+          {
+            label: "Set smart limits and protect the buildings.",
+            effects: { ei: 8, it: 8, ps: 8 },
+            reaction: "thrive",
+            note: "Steady visitors, and the site stays beautiful for years to come.",
+          },
+          {
+            label: "Close off most of the site to be safe.",
+            effects: { ei: -5, it: 0, ps: 3 },
+            reaction: "neutral",
+            note: "The buildings are protected, but visitors leave disappointed and you make very little.",
+          },
+        ],
+      },
+    ],
+  },
 };
 
 // ============================================================================
@@ -391,6 +471,146 @@ const TECH_ROOM = {
   BLINK_HZ: [0.18, 0.26, 0.34], // a few slow blink rates, staggered across the dots
   BAR_HZ: 0.3,            // how fast the screen bars breathe (cycles/sec)
   SCROLL_SPEED: 0.12,     // m/s the screen log-lines drift upward
+};
+
+// ============================================================================
+// TOURISM HUB — BUILD LAYOUT  (the historic village that assembles on the green)
+// The student arrives to a small Colonial Williamsburg site (a raised green with
+// two brick buildings already standing) and, choice by choice, adds a ticket booth
+// with its crowd, an attraction, and finally the site's condition. Positions are
+// local to the staging group (which sits at the scene origin and is shifted FORWARD
+// toward the student, exactly like the Tech lot). The crowd COUNTS per option carry
+// the "bustling vs empty" story. Palette is the warm colonial parchment look. All
+// motion is slow and gentle on purpose (kids in a headset) — tuned via STAGING.
+// ============================================================================
+const TOURISM_BUILD = {
+  FORWARD: 1.8,            // bring the whole village toward the student (matches Tech)
+  GREEN: [0, 0.64, -0.85] as [number, number, number], // green/table-top center (own frame)
+  GREEN_W: 2.9,
+  GREEN_D: 2.5,
+  GREEN_THICK: 0.12,       // the village sits on a raised green so it clears the floating UI
+  // two colonial buildings, present from arrival (the site you already run).
+  HALL_POS: [-0.55, 0, -1.0] as [number, number, number], // main brick hall + cupola
+  HALL_W: 0.95, HALL_H: 0.62, HALL_D: 0.85,
+  HOUSE_POS: [0.6, 0, -1.2] as [number, number, number],  // a smaller brick house
+  HOUSE_W: 0.6, HOUSE_H: 0.46, HOUSE_D: 0.6,
+  BOOTH_POS: [1.0, 0, 0.2] as [number, number, number],   // ticket booth near the entrance
+  ATTRACT_POS: [-0.15, 0, -0.35] as [number, number, number], // attraction sits center-green
+  // crowd cluster anchors (loose clusters of visitors); the COUNTS come from the picks.
+  CROWD_BOOTH_AT: [0.45, 0, -0.2] as [number, number, number],
+  CROWD_ATTRACT_AT: [-0.4, 0, 0.0] as [number, number, number],
+  CROWD_SITE_AT: [0.1, 0, 0.15] as [number, number, number],
+  // how many visitors each option draws (index matches the option order in the pack).
+  CROWD_BOOTH_N: [7, 5, 2],    // D1 pricing: free=large, fair=healthy, very high=sparse
+  CROWD_ATTRACT_N: [0, 5, 4],  // D2 draw:   do nothing=none, authentic=more, flashy=a crowd
+  CROWD_SITE_N: [6, 5, 1],     // D3 crowds: huge=lots, smart limits=steady, close off=thin
+  COLOR: {
+    green: "#6aa84f",       // grassy green
+    path: "#d8c79e",        // sandy path
+    brick: "#9c4a2f",       // colonial brick red
+    trim: "#f2efe6",        // white trim
+    roof: "#6b4a30",        // wood shingle brown
+    cupola: "#f4f1e8",      // white cupola
+    spire: "#caa24a",       // gold spire (colonial gold)
+    window: "#ffd98a",      // warm lamp-lit windows (the buildings' lit parts, role "site")
+    boothWood: "#8a6a44",
+    boothRoof: "#7a4a2c",
+    lantern: "#ffcf6b",     // booth lantern + sign (lit, role "booth")
+    banner: "#3b5f8a",      // colonial blue banner
+    exhibit: "#a9824e",     // wood craft / exhibit table
+    barrel: "#7c5a36",
+    gaudy1: "#ff3fb0",      // garish neon pink (flashy fake attraction)
+    gaudy2: "#46e0ff",      // garish neon cyan
+    gaudy3: "#ffe14a",      // garish neon yellow
+    signPost: "#7c6a52",
+    visitor: "#4f63a6",     // visitor clothing (muted colonial blue)
+    visitorAlt: "#8a5b86",  // a second visitor color for variety
+    visitorAlt2: "#b07a3c", // a third visitor color
+    head: "#e6c39e",        // visitor head / skin
+    worn: "#6f675c",        // dingy worn patches on damaged buildings
+    cleanGleam: "#fff3c8",  // a fresh, well-kept sparkle (lit, role "site")
+    rope: "#caa24a",        // closed-off ropes / barriers (lit, role "site")
+    post: "#5b4a36",        // green table legs + rope posts
+  },
+};
+
+// ============================================================================
+// TOURISM HUB — VILLAGE BACKDROP  (the calm Colonial Williamsburg town around the
+// build, the outdoor counterpart to the Tech Office server room). A green/lawn, a
+// few primitive colonial buildings lining the sides and back, a low white rail
+// fence, a sandy path, trees, a flag, a well, and a few slow distant visitors.
+// Warm daytime palette. CLEARANCE RULE: nothing tall sits in the central corridor
+// in front of the build — buildings/trees stay at |x| >= CLEAR_X unless they are
+// safely behind the build (z <= BACK_Z). Low props (the 0.34m fence, the short
+// visitors) only need to clear the build's footprint (|x| > ~1.8); they are too
+// low to hide the panels (which also draw on top via depthTest off). All motion is
+// slow and runs on the shared scene setInterval (never rAF). Tunable here.
+// ============================================================================
+const TOURISM_VILLAGE = {
+  GROUND_Y: -0.06,        // grass top, a touch below the standing floor
+  CLEAR_X: 3.0,           // tall props keep |x| >= this (clear of the central corridor)
+  BACK_Z: -3.6,           // ...unless they sit behind the build at z <= this
+  FENCE_H: 0.34,          // low rail fence height (never blocks anything)
+  // gentle motion (cycles/sec + small amplitudes). Slow on purpose; nothing flashes.
+  FLAG_HZ: 0.3, FLAG_SWING: 0.1,
+  TREE_HZ: 0.12, TREE_SWAY: 0.04,
+  VISITOR_HZ: 0.5, VISITOR_BOB: 0.02, VISITOR_SWAY: 0.05,
+  COLOR: {
+    grass: "#6aa84f",
+    path: "#d8c79e",
+    brickA: "#9c4a2f",      // brick-red house
+    brickB: "#b06a4a",      // a lighter brick
+    clapboardA: "#e7dcc2",  // cream clapboard
+    clapboardB: "#cdd8c0",  // pale sage clapboard
+    roofA: "#6b4a30",       // brown shingle
+    roofB: "#7a6a58",       // weathered grey shingle
+    trim: "#f4efe3",        // white trim band
+    door: "#5b3a26",        // dark wood door
+    window: "#bcd2e0",      // pale daylight glass (NOT emissive, so it never glows/flashes)
+    chimney: "#8a5440",
+    cupola: "#f4f1e8",      // white meeting-house cupola
+    spire: "#caa24a",       // gold spire
+    fence: "#efe9da",       // white rail fence
+    flagpole: "#6b5036",
+    banner: "#3b5f8a",      // colonial blue flag
+    trunk: "#6b4f30",
+    leaf: "#4f8f43",
+    visitor: "#5566a0",     // distant villager clothing
+    visitorAlt: "#9a6a8c",
+    head: "#e6c39e",
+    wellStone: "#9a958c",
+    wellRoof: "#6b4a30",
+  },
+  // colonial buildings lining the green: [x, z, w, h, d, wallKey, roofKey, kind].
+  // kind: "house" or "meeting" (+ cupola & gold spire). Each obeys the clearance rule.
+  HOUSES: [
+    [-3.5, -0.3, 1.1, 0.95, 1.0, "brickA", "roofA", "house"],
+    [-3.9, -2.0, 1.0, 0.8, 0.95, "clapboardA", "roofB", "house"],
+    [-3.6, 1.3, 0.95, 0.78, 0.9, "clapboardB", "roofA", "house"],
+    [3.5, -0.3, 1.1, 0.95, 1.0, "clapboardA", "roofA", "house"],
+    [3.9, -2.0, 1.0, 0.85, 0.95, "brickB", "roofB", "house"],
+    [3.6, 1.3, 0.95, 0.78, 0.9, "brickA", "roofA", "house"],
+    [-1.5, -4.7, 1.3, 1.0, 1.1, "brickA", "roofA", "meeting"], // back row, behind the build
+    [1.7, -4.9, 1.1, 0.85, 1.0, "clapboardB", "roofB", "house"],
+  ] as [number, number, number, number, number, string, string, string][],
+  // simple far rooftops for a town skyline (body + roof only), well behind everything.
+  FAR_ROOFS: [[-2.6, -6.6], [0.6, -7.0], [2.9, -6.6]] as [number, number][],
+  // a few trees framing the green (sides/back only).
+  TREES: [
+    [-4.9, -1.1, 1.1], [-4.7, 0.9, 0.95], [4.9, -1.1, 1.1], [4.7, 0.9, 0.95],
+    [-2.7, -5.0, 1.0], [2.9, -5.0, 1.0], [0.0, -5.5, 1.2],
+  ] as [number, number, number][],
+  // low white rail fences lining the green: [x, z, length, axis] (axis "x" or "z").
+  FENCES: [
+    [-2.4, -0.8, 4.4, "z"], [2.4, -0.8, 4.4, "z"], [0.0, -3.2, 4.6, "x"],
+  ] as [number, number, number, string][],
+  // a few distant visitors strolling the green edges: [x, z, colorKey].
+  VISITORS: [
+    [-2.5, -0.9, "visitor"], [-2.7, 0.5, "visitorAlt"], [2.5, -0.9, "visitorAlt"],
+    [2.7, 0.6, "visitor"], [-2.4, -2.2, "visitor"], [2.4, -2.4, "visitorAlt"],
+  ] as [number, number, string][],
+  FLAG_POS: [-2.1, 0, -2.9] as [number, number, number], // flagpole on the green, behind the build
+  WELL_POS: [1.6, 0, -2.7] as [number, number, number],  // a colonial well, behind the build
 };
 
 // ============================================================================
@@ -1775,10 +1995,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const pack = DECISION_PACKS[stop.id];
     if (pack) {
       showStopScene(stop.id);
-      // Start the room's quiet hum now the student is inside. Entering the stop
-      // was itself an interaction (the landmark press), so the AudioContext is
-      // already allowed to play. Only the Tech Office has a server room today.
+      // Start the stop's quiet ambience now the student is inside. Entering the
+      // stop was itself an interaction (the landmark press), so the AudioContext is
+      // already allowed to play: the Tech Office gets its server-room hum, the
+      // Tourism Hub gets its outdoor village murmur + birdsong.
       if (stop.id === "tech") startHum();
+      else if (stop.id === "tourism") startVillageAmbience();
       startDecisionPack(stop, pack);
       return;
     }
@@ -1802,7 +2024,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     if (finishBtn.object3D) finishBtn.object3D.visible = false;
     hideRunner();          // clear any runner panels / option cards
     hideAllStopScenes();   // and the calm per-stop backdrop
-    stopHum();             // fade out the room ambience as we leave
+    stopHum();             // fade out the Tech Office room ambience as we leave
+    stopVillageAmbience(); // fade out the Tourism village ambience as we leave
   }
 
   // ---- THE VISIT: enter on a landmark select, finish on the button ----
@@ -2040,19 +2263,204 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     return { group: g, tick };
   }
 
-  const stopScenes: { [id: string]: Group } = {};
-  const techRoom = buildTechStopScene();
-  const techScene = techRoom.group;
-  techScene.visible = false;
-  scene.add(techScene);
-  stopScenes["tech"] = techScene;
+  // ---- Tourism Hub: a calm Colonial Williamsburg VILLAGE wrapped around the build,
+  // the outdoor counterpart to the Tech Office server room. A grassy green + sandy
+  // path, a few primitive colonial buildings + far rooftops lining the sides and
+  // back, a low white rail fence, trees, a flag, a well, and a few slow distant
+  // visitors. Warm daytime palette. Everything obeys TOURISM_VILLAGE's clearance
+  // rule (tall props at |x| >= CLEAR_X unless behind the build at z <= BACK_Z; low
+  // props just clear the build footprint), so the village never sits in front of
+  // the decision panels, the build spot, or the assembling scene. Returns its Group
+  // + a tick(clock) the caller drives on setInterval (rAF pauses in the headset).
+  // Same { group, tick } contract the server room uses. ----
+  function buildTourismStopScene(): { group: Group; tick: (clock: number) => void } {
+    const V = TOURISM_VILLAGE;
+    const C = V.COLOR;
+    const g = new Group();
+    const swayers: { mesh: any; baseX: number; amp: number; phase: number }[] = [];
+    const flags: { mesh: any; phase: number }[] = [];
+    const visitors: { g: Group; baseX: number; phase: number }[] = [];
 
-  // Gently animate the server room while the student is in the Tech Office.
-  // setInterval, not rAF (rAF pauses in the headset); idle on the hub.
-  let roomClock = 0;
+    // the green underfoot, wide enough to replace the indoor floor with open lawn,
+    // plus a sandy path leading from the student up into the village.
+    const grass = meshBox(16, 0.12, 16, C.grass);
+    grass.position.set(0, V.GROUND_Y, 0.5);
+    g.add(grass);
+    const approach = meshBox(1.6, 0.02, 9, C.path);
+    approach.position.set(0.2, 0.01, 3.6);
+    g.add(approach);
+
+    // a colonial building from primitives: brick/clapboard body, a hip roof (a
+    // 4-sided pyramid, faces aligned to the walls), a chimney, white trim, a door,
+    // and two plain daylight windows on the front (+z, toward the student). Windows
+    // are NOT emissive, so the backdrop never glows or competes with the build.
+    function colonialBuilding(
+      x: number, z: number, w: number, h: number, d: number,
+      wallKey: string, roofKey: string, kind: string,
+    ) {
+      const wall = (C as any)[wallKey], roofC = (C as any)[roofKey];
+      const body = meshBox(w, h, d, wall);
+      body.position.set(x, h / 2, z);
+      g.add(body);
+      const span = Math.max(w, d);
+      const roofH = span * 0.42;
+      const roof = meshCone(span * 0.8, roofH, roofC, 4);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.set(x, h + roofH / 2, z);
+      g.add(roof);
+      const chim = meshBox(0.12, 0.34, 0.12, C.chimney);
+      chim.position.set(x + w * 0.28, h + 0.2, z - d * 0.18);
+      g.add(chim);
+      const fz = z + d / 2 + 0.012;
+      const trim = meshBox(w * 0.96, 0.06, 0.02, C.trim);
+      trim.position.set(x, h - 0.05, fz);
+      g.add(trim);
+      const door = meshBox(0.16, 0.3, 0.02, C.door);
+      door.position.set(x, 0.15, fz);
+      g.add(door);
+      for (const wx of [x - w * 0.26, x + w * 0.26]) {
+        const win = meshBox(0.16, 0.18, 0.02, C.window);
+        win.position.set(wx, h * 0.55, fz);
+        g.add(win);
+      }
+      if (kind === "meeting") {
+        const cup = meshBox(0.22, 0.18, 0.22, C.cupola);
+        cup.position.set(x, h + roofH + 0.09, z);
+        g.add(cup);
+        const spire = meshCone(0.08, 0.26, C.spire, 8);
+        spire.position.set(x, h + roofH + 0.3, z);
+        g.add(spire);
+      }
+    }
+    for (const b of V.HOUSES) {
+      colonialBuilding(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+    }
+    // simple far rooftops for a town skyline (body + roof), well behind everything.
+    for (const rp of V.FAR_ROOFS) {
+      const house = meshBox(1.1, 0.7, 1.0, C.brickA);
+      house.position.set(rp[0], 0.35, rp[1]);
+      g.add(house);
+      const roof = meshCone(0.95, 0.5, C.roofA, 4);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.set(rp[0], 0.9, rp[1]);
+      g.add(roof);
+    }
+
+    // a leafy tree: a trunk + a canopy that sways slowly side to side.
+    for (const sp of V.TREES) {
+      const s = sp[2];
+      const trunk = meshCyl(0.1 * s, 0.14 * s, 1.1 * s, C.trunk);
+      trunk.position.set(sp[0], 0.55 * s, sp[1]);
+      g.add(trunk);
+      const canopy = meshSphere(0.68 * s, C.leaf);
+      canopy.position.set(sp[0], 1.25 * s, sp[1]);
+      g.add(canopy);
+      swayers.push({ mesh: canopy, baseX: sp[0], amp: V.TREE_SWAY * s, phase: sp[0] * 0.7 + sp[1] * 0.3 });
+    }
+
+    // a low white rail fence (two rails + sparse posts) lining the green's edges.
+    for (const fc of V.FENCES) {
+      const fx = fc[0], fz = fc[1], len = fc[2], axis = fc[3];
+      for (const ry of [V.FENCE_H * 0.55, V.FENCE_H]) {
+        const rail = axis === "z" ? meshBox(0.04, 0.04, len, C.fence) : meshBox(len, 0.04, 0.04, C.fence);
+        rail.position.set(fx, ry, fz);
+        g.add(rail);
+      }
+      const n = Math.max(2, Math.round(len / 0.9));
+      for (let i = 0; i <= n; i++) {
+        const f = i / n - 0.5;
+        const post = meshBox(0.05, V.FENCE_H + 0.06, 0.05, C.fence);
+        post.position.set(axis === "x" ? fx + f * len : fx, (V.FENCE_H + 0.06) / 2, axis === "z" ? fz + f * len : fz);
+        g.add(post);
+      }
+    }
+
+    // a tall flagpole on the green with a colonial banner that waves gently.
+    const pole = meshCyl(0.035, 0.035, 2.4, C.flagpole);
+    pole.position.set(V.FLAG_POS[0], 1.2, V.FLAG_POS[2]);
+    g.add(pole);
+    const flag = meshBox(0.7, 0.42, 0.03, C.banner);
+    flag.position.set(V.FLAG_POS[0] + 0.35, 2.12, V.FLAG_POS[2]);
+    g.add(flag);
+    flags.push({ mesh: flag, phase: 0 });
+
+    // a little colonial well for charm, behind the build.
+    {
+      const wx = V.WELL_POS[0], wz = V.WELL_POS[2];
+      const stone = meshCyl(0.22, 0.24, 0.4, C.wellStone);
+      stone.position.set(wx, 0.2, wz);
+      g.add(stone);
+      for (const sx of [-0.2, 0.2]) {
+        const wpost = meshCyl(0.025, 0.025, 0.5, C.flagpole);
+        wpost.position.set(wx + sx, 0.55, wz);
+        g.add(wpost);
+      }
+      const wroof = meshCone(0.34, 0.2, C.wellRoof, 4);
+      wroof.rotation.y = Math.PI / 4;
+      wroof.position.set(wx, 0.9, wz);
+      g.add(wroof);
+    }
+
+    // a few distant visitors strolling the green edges (a body + head Group we can
+    // bob/sway). Slow and calm; well clear of the build footprint.
+    for (const vp of V.VISITORS) {
+      const vg = new Group();
+      const body = meshCyl(0.06, 0.08, 0.28, (C as any)[vp[2]]);
+      body.position.set(0, 0.14, 0);
+      vg.add(body);
+      const head = meshSphere(0.08, C.head);
+      head.position.set(0, 0.34, 0);
+      vg.add(head);
+      vg.position.set(vp[0], 0, vp[1]);
+      g.add(vg);
+      visitors.push({ g: vg, baseX: vp[0], phase: vp[0] * 1.7 + vp[1] });
+    }
+
+    // The gentle life: canopies drift, the flag waves, distant visitors bob and
+    // sway slowly. All slow, nothing flashes; the caller ticks this on setInterval.
+    function tick(clock: number) {
+      const t = clock / 1000;
+      for (const s of swayers) {
+        s.mesh.position.x = s.baseX + Math.sin(2 * Math.PI * V.TREE_HZ * t + s.phase) * s.amp;
+      }
+      for (const f of flags) {
+        const w = Math.sin(2 * Math.PI * V.FLAG_HZ * t + f.phase);
+        f.mesh.rotation.z = w * V.FLAG_SWING;
+        f.mesh.scale.x = 1 + 0.12 * w;
+      }
+      for (const v of visitors) {
+        v.g.position.y = Math.abs(Math.sin(2 * Math.PI * V.VISITOR_HZ * t + v.phase)) * V.VISITOR_BOB;
+        v.g.position.x = v.baseX + Math.sin(2 * Math.PI * V.VISITOR_HZ * 0.5 * t + v.phase) * V.VISITOR_SWAY;
+      }
+    }
+
+    return { group: g, tick };
+  }
+
+  // Each stop owns a calm BACKDROP scene, registered here as { group, tick }: the
+  // group shows/hides with the stop, and ONE shared loop ticks whichever stop is
+  // active. Generic on purpose — adding a stop is just another registerStopScene
+  // call; the loop never special-cases a stop id.
+  const stopScenes: { [id: string]: Group } = {};
+  const stopSceneTicks: { [id: string]: (clock: number) => void } = {};
+  function registerStopScene(id: string, built: { group: Group; tick: (clock: number) => void }) {
+    built.group.visible = false;
+    scene.add(built.group);
+    stopScenes[id] = built.group;
+    stopSceneTicks[id] = built.tick;
+  }
+  registerStopScene("tech", buildTechStopScene());       // the Tech Office server room
+  registerStopScene("tourism", buildTourismStopScene()); // the Colonial Williamsburg green
+
+  // One shared loop gently animates whichever stop's backdrop is showing (server
+  // room dots/screens, or the Tourism treeline/flag). setInterval, not rAF (rAF
+  // pauses in the headset); idle on the hub, where no stop scene is shown.
+  let sceneClock = 0;
   setInterval(function () {
-    roomClock += STAGING.TICK_MS;
-    if (currentView !== "hub" && activeStopId === "tech") techRoom.tick(roomClock);
+    sceneClock += STAGING.TICK_MS;
+    if (currentView === "hub") return;
+    const tick = activeStopId ? stopSceneTicks[activeStopId] : null;
+    if (tick) tick(sceneClock);
   }, STAGING.TICK_MS);
 
   function showStopScene(id: string) {
@@ -2080,6 +2488,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   };
   const stopStagings: { [id: string]: StopStaging } = {};
   type GlowRole = "building" | "power" | "runtime";
+  type TourismRole = "booth" | "attraction" | "site"; // the Tourism build's three stages
 
   // ---- Tech Office: a data center built piece by piece on the lot ahead of the
   // student. Decision 1 raises the BUILDING (with a cue for the site chosen),
@@ -2373,9 +2782,344 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     return { group, reset, addStage, tick };
   }
 
+  // ---- Tourism Hub: a Colonial Williamsburg village built up choice by choice on
+  // the green ahead of the student. The site (a green with two brick buildings) is
+  // there from arrival. Decision 1 (pricing) raises the TICKET BOOTH and an arriving
+  // crowd sized by the price; Decision 2 (draw) reveals the ATTRACTION (real exhibits,
+  // gaudy fakes, or almost nothing) with more or fewer visitors; Decision 3 (crowds vs
+  // buildings) sets the SITE's condition (a clean gleam, worn patches, or closed-off
+  // ropes) and the final crowd. Each stage then THRIVES (warm steady glow), STRUGGLES
+  // (dim uneven flicker), or runs NEUTRAL (a quiet mid glow). Same { group, reset,
+  // addStage, tick } contract Tech uses, so the runner drives it unchanged. All motion
+  // stays slow and gentle (kids in a headset). ----
+  function buildTourismStaging(): StopStaging {
+    const T = TOURISM_BUILD;
+    const C = T.COLOR;
+    const group = new Group();
+    group.position.z = T.FORWARD; // bring the village toward the student
+
+    // role-tagged animated lights (intensity follows each stage's reaction).
+    const glowParts: { mesh: any; role: TourismRole }[] = [];
+    const visitorPalette = [C.visitor, C.visitorAlt, C.visitorAlt2];
+    // each stage's reaction (null until built) + its ease-in progress.
+    const reaction: { booth: StageReaction | null; attraction: StageReaction | null; site: StageReaction | null } =
+      { booth: null, attraction: null, site: null };
+    const appear = { booth: 0, attraction: 0, site: 0 };
+
+    // register a mesh as an animated light (driven by its stage's reaction).
+    function lit(mesh: any, color: string, role: TourismRole) {
+      mesh.material.emissive = new Color(color);
+      mesh.material.emissiveIntensity = 0;
+      glowParts.push({ mesh, role });
+      return mesh;
+    }
+
+    // ---- the green (a raised table) + the colonial buildings already standing ----
+    const green = meshBox(T.GREEN_W, T.GREEN_THICK, T.GREEN_D, C.green);
+    green.position.set(T.GREEN[0], T.GREEN[1], T.GREEN[2]);
+    group.add(green);
+    const greenTop = T.GREEN[1] + T.GREEN_THICK / 2;
+    const greenBottom = T.GREEN[1] - T.GREEN_THICK / 2;
+    for (const lx of [-1.2, 1.2]) {
+      for (const lz of [-1.0, 1.0]) {
+        const leg = meshBox(0.12, greenBottom, 0.12, C.post);
+        leg.position.set(lx, greenBottom / 2, T.GREEN[2] + lz);
+        group.add(leg);
+      }
+    }
+    // a sandy path across the green so it reads as a walkable village.
+    const path = meshBox(0.55, 0.012, T.GREEN_D * 0.85, C.path);
+    path.position.set(0.15, greenTop + 0.008, T.GREEN[2]);
+    group.add(path);
+
+    // a colonial building: brick block + wood roof + white trim + warm windows.
+    // The windows are role "site", so they light up with the final-condition pick.
+    function colonialBuilding(pos: [number, number, number], w: number, h: number, d: number, cupola: boolean) {
+      const cx = pos[0], cz = pos[2];
+      const body = meshBox(w, h, d, C.brick);
+      body.position.set(cx, greenTop + h / 2, cz);
+      group.add(body);
+      const roof = meshBox(w + 0.06, 0.06, d + 0.06, C.roof);
+      roof.position.set(cx, greenTop + h + 0.03, cz);
+      group.add(roof);
+      const fz = cz + d / 2 + 0.012;
+      const trim = meshBox(w, 0.05, 0.02, C.trim);
+      trim.position.set(cx, greenTop + 0.05, fz);
+      group.add(trim);
+      for (const wx of [cx - w * 0.25, cx + w * 0.25]) {
+        const win = meshBox(0.12, 0.16, 0.012, C.window);
+        win.position.set(wx, greenTop + h * 0.5, fz);
+        group.add(lit(win, C.window, "site"));
+      }
+      if (cupola) {
+        const base = meshBox(0.18, 0.12, 0.18, C.cupola);
+        base.position.set(cx, greenTop + h + 0.1, cz);
+        group.add(base);
+        const spire = meshCone(0.06, 0.18, C.spire);
+        spire.position.set(cx, greenTop + h + 0.27, cz);
+        group.add(spire);
+      }
+      return { cx, cz, fz, w, h };
+    }
+    const hall = colonialBuilding(T.HALL_POS, T.HALL_W, T.HALL_H, T.HALL_D, true);
+    const house = colonialBuilding(T.HOUSE_POS, T.HOUSE_W, T.HOUSE_H, T.HOUSE_D, false);
+
+    // a calm visitor figure (body + head) parented to a Group we can bob/sway.
+    function makeVisitor(parent: Group, x: number, z: number, color: string) {
+      const vg = new Group();
+      const body = meshCyl(0.05, 0.07, 0.16, color);
+      body.position.set(x, greenTop + 0.08, z);
+      vg.add(body);
+      const head = meshSphere(0.045, C.head);
+      head.position.set(x, greenTop + 0.2, z);
+      vg.add(head);
+      parent.add(vg);
+      return vg;
+    }
+    // a crowd pool of `max` visitors in a loose cluster; deterministic spots (no rng).
+    function makeCrowd(parent: Group, anchor: [number, number, number], max: number) {
+      const spots = [
+        [0.0, 0.0], [0.24, 0.13], [-0.22, 0.1], [0.13, -0.18], [-0.18, -0.15],
+        [0.36, -0.05], [-0.36, -0.02], [0.05, 0.26],
+      ];
+      const list: { g: Group; phase: number }[] = [];
+      for (let i = 0; i < max; i++) {
+        const s = spots[i % spots.length];
+        const v = makeVisitor(parent, anchor[0] + s[0], anchor[2] + s[1], visitorPalette[i % visitorPalette.length]);
+        v.visible = false;
+        list.push({ g: v, phase: i * 1.3 });
+      }
+      return list;
+    }
+
+    // =================== STAGE 1: ticket booth + arriving crowd ===================
+    const boothStage = new Group();
+    boothStage.visible = false;
+    group.add(boothStage);
+    {
+      const bx = T.BOOTH_POS[0], bz = T.BOOTH_POS[2];
+      const booth = meshBox(0.34, 0.4, 0.3, C.boothWood);
+      booth.position.set(bx, greenTop + 0.2, bz);
+      boothStage.add(booth);
+      const counter = meshBox(0.38, 0.05, 0.14, C.trim);
+      counter.position.set(bx, greenTop + 0.3, bz + 0.18);
+      boothStage.add(counter);
+      const roof = meshCone(0.34, 0.18, C.boothRoof);
+      roof.position.set(bx, greenTop + 0.49, bz);
+      roof.rotation.y = Math.PI / 4;
+      boothStage.add(roof);
+      // the booth lantern + sign: the lit parts that react to the pricing pick.
+      const lantern = meshSphere(0.05, C.lantern);
+      lantern.position.set(bx + 0.16, greenTop + 0.42, bz + 0.14);
+      boothStage.add(lit(lantern, C.lantern, "booth"));
+      const sign = meshBox(0.26, 0.12, 0.02, C.lantern);
+      sign.position.set(bx, greenTop + 0.52, bz + 0.16);
+      boothStage.add(lit(sign, C.lantern, "booth"));
+    }
+    const crowdBooth = makeCrowd(boothStage, T.CROWD_BOOTH_AT, Math.max(...T.CROWD_BOOTH_N));
+
+    // =================== STAGE 2: the attraction (3 swappable cues) ===============
+    const attractStage = new Group();
+    attractStage.visible = false;
+    group.add(attractStage);
+    const ax = T.ATTRACT_POS[0], az = T.ATTRACT_POS[2];
+    // cue A: authentic colonial history — a craft table, barrels, a colonial banner.
+    const cueAuthentic = new Group();
+    attractStage.add(cueAuthentic);
+    {
+      const table = meshBox(0.5, 0.06, 0.3, C.exhibit);
+      table.position.set(ax, greenTop + 0.18, az);
+      cueAuthentic.add(table);
+      for (const lx of [-0.2, 0.2]) for (const lz of [-0.1, 0.1]) {
+        const leg = meshBox(0.04, 0.18, 0.04, C.barrel);
+        leg.position.set(ax + lx, greenTop + 0.09, az + lz);
+        cueAuthentic.add(leg);
+      }
+      for (const bx2 of [-0.34, 0.34]) {
+        const barrel = meshCyl(0.08, 0.08, 0.18, C.barrel);
+        barrel.position.set(ax + bx2, greenTop + 0.09, az - 0.04);
+        cueAuthentic.add(barrel);
+      }
+      const bpole = meshCyl(0.02, 0.02, 0.6, C.signPost);
+      bpole.position.set(ax + 0.12, greenTop + 0.3, az + 0.16);
+      cueAuthentic.add(bpole);
+      const banner = meshBox(0.02, 0.24, 0.3, C.banner);
+      banner.position.set(ax + 0.13, greenTop + 0.46, az + 0.31);
+      cueAuthentic.add(lit(banner, C.banner, "attraction"));
+      const lamp = meshSphere(0.045, C.lantern);
+      lamp.position.set(ax - 0.12, greenTop + 0.4, az + 0.16);
+      cueAuthentic.add(lit(lamp, C.lantern, "attraction"));
+    }
+    // cue B: flashy fake — a gaudy oversized arch in clashing neon colors.
+    const cueFlashy = new Group();
+    attractStage.add(cueFlashy);
+    {
+      for (const sx of [-0.3, 0.3]) {
+        const leg = meshBox(0.1, 0.7, 0.1, sx < 0 ? C.gaudy1 : C.gaudy2);
+        leg.position.set(ax + sx, greenTop + 0.35, az);
+        cueFlashy.add(lit(leg, sx < 0 ? C.gaudy1 : C.gaudy2, "attraction"));
+      }
+      const top = meshBox(0.82, 0.12, 0.12, C.gaudy3);
+      top.position.set(ax, greenTop + 0.74, az);
+      cueFlashy.add(lit(top, C.gaudy3, "attraction"));
+      const blob = meshSphere(0.14, C.gaudy1);
+      blob.position.set(ax, greenTop + 0.92, az);
+      cueFlashy.add(lit(blob, C.gaudy1, "attraction"));
+    }
+    // cue C: do nothing — a lone empty signpost, almost nothing to see.
+    const cueNothing = new Group();
+    attractStage.add(cueNothing);
+    {
+      const post = meshCyl(0.025, 0.025, 0.5, C.signPost);
+      post.position.set(ax, greenTop + 0.25, az);
+      cueNothing.add(post);
+      const board = meshBox(0.28, 0.16, 0.02, C.signPost);
+      board.position.set(ax, greenTop + 0.5, az);
+      cueNothing.add(board);
+    }
+    cueAuthentic.visible = cueFlashy.visible = cueNothing.visible = false;
+    const crowdAttract = makeCrowd(attractStage, T.CROWD_ATTRACT_AT, Math.max(...T.CROWD_ATTRACT_N));
+
+    // =================== STAGE 3: the site's condition (3 swappable cues) =========
+    const siteStage = new Group();
+    siteStage.visible = false;
+    group.add(siteStage);
+    // cue: smart limits — fresh and well-kept (a clean gleam + tidy flower boxes).
+    const cueClean = new Group();
+    siteStage.add(cueClean);
+    for (const b of [hall, house]) {
+      const gleam = meshBox(b.w * 0.9, 0.04, 0.02, C.cleanGleam);
+      gleam.position.set(b.cx, greenTop + b.h - 0.02, b.fz);
+      cueClean.add(lit(gleam, C.cleanGleam, "site"));
+      const box = meshBox(b.w * 0.7, 0.05, 0.06, C.spire);
+      box.position.set(b.cx, greenTop + b.h * 0.32, b.fz + 0.02);
+      cueClean.add(box);
+    }
+    // cue: huge crowds — worn, dingy patches across the building fronts.
+    const cueWorn = new Group();
+    siteStage.add(cueWorn);
+    for (const b of [hall, house]) {
+      for (const p of [[-0.22, 0.55], [0.2, 0.32], [0.0, 0.72]]) {
+        const patch = meshBox(0.14, 0.12, 0.012, C.worn);
+        patch.position.set(b.cx + p[0] * b.w, greenTop + b.h * p[1], b.fz + 0.003);
+        cueWorn.add(patch);
+      }
+    }
+    // cue: close off — ropes on posts across the front, the site mostly shut.
+    const cueClosed = new Group();
+    siteStage.add(cueClosed);
+    {
+      const frontZ = T.GREEN[2] + 0.35;
+      for (const px of [-0.8, -0.27, 0.27, 0.8]) {
+        const rpost = meshCyl(0.02, 0.02, 0.3, C.post);
+        rpost.position.set(px, greenTop + 0.15, frontZ);
+        cueClosed.add(rpost);
+      }
+      for (const seg of [[-0.8, -0.27], [-0.27, 0.27], [0.27, 0.8]]) {
+        const rope = meshBox(seg[1] - seg[0], 0.02, 0.02, C.rope);
+        rope.position.set((seg[0] + seg[1]) / 2, greenTop + 0.26, frontZ);
+        cueClosed.add(lit(rope, C.rope, "site"));
+      }
+    }
+    cueClean.visible = cueWorn.visible = cueClosed.visible = false;
+    const crowdSite = makeCrowd(siteStage, T.CROWD_SITE_AT, Math.max(...T.CROWD_SITE_N));
+
+    const stages: TourismRole[] = ["booth", "attraction", "site"];
+    const stageGroup: { [k in TourismRole]: Group } = { booth: boothStage, attraction: attractStage, site: siteStage };
+    const crowds: { [k in TourismRole]: { g: Group; phase: number }[] } = { booth: crowdBooth, attraction: crowdAttract, site: crowdSite };
+
+    // a slow, uneven 0..1 wave for the "struggling/troubled" look — never a strobe.
+    function flicker(t: number) {
+      const w = 0.6 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_A * t)
+              + 0.4 * Math.sin(2 * Math.PI * STAGING.FLICKER_HZ_B * t + 1.3);
+      return 0.5 + 0.5 * w;
+    }
+    function setCrowdCount(list: { g: Group; phase: number }[], n: number) {
+      for (let i = 0; i < list.length; i++) list[i].g.visible = i < n;
+    }
+
+    // ---- the three calls the runner drives ----
+    function reset() {
+      reaction.booth = reaction.attraction = reaction.site = null;
+      appear.booth = appear.attraction = appear.site = 0;
+      boothStage.visible = attractStage.visible = siteStage.visible = false;
+      boothStage.position.y = attractStage.position.y = siteStage.position.y = 0;
+      cueAuthentic.visible = cueFlashy.visible = cueNothing.visible = false;
+      cueClean.visible = cueWorn.visible = cueClosed.visible = false;
+      for (const c of [crowdBooth, crowdAttract, crowdSite]) for (const v of c) v.g.visible = false;
+      for (const gp of glowParts) gp.mesh.material.emissiveIntensity = 0;
+    }
+
+    function addStage(i: number, optionIndex: number, r: StageReaction) {
+      if (i === 0) {
+        setCrowdCount(crowdBooth, T.CROWD_BOOTH_N[optionIndex] || 0); // free=large, fair=healthy, high=sparse
+        reaction.booth = r; appear.booth = 0; boothStage.visible = true;
+      } else if (i === 1) {
+        cueNothing.visible = optionIndex === 0;   // option 0 = do nothing
+        cueAuthentic.visible = optionIndex === 1; // option 1 = real history
+        cueFlashy.visible = optionIndex === 2;    // option 2 = flashy fake
+        setCrowdCount(crowdAttract, T.CROWD_ATTRACT_N[optionIndex] || 0);
+        reaction.attraction = r; appear.attraction = 0; attractStage.visible = true;
+      } else if (i === 2) {
+        cueWorn.visible = optionIndex === 0;      // option 0 = huge crowds (worn)
+        cueClean.visible = optionIndex === 1;     // option 1 = smart limits (clean)
+        cueClosed.visible = optionIndex === 2;    // option 2 = close off (shut)
+        setCrowdCount(crowdSite, T.CROWD_SITE_N[optionIndex] || 0);
+        reaction.site = r; appear.site = 0; siteStage.visible = true;
+      }
+    }
+
+    // gently bob + sway each visible visitor (slow and calm; a thriving crowd is a
+    // touch livelier). Never fast, never flashing.
+    function bobCrowd(role: TourismRole, t: number) {
+      const r = reaction[role];
+      const amp = r === "thrive" ? STAGING.WORKER_BOB_AMP * 1.5 : STAGING.WORKER_BOB_AMP;
+      for (const v of crowds[role]) {
+        if (!v.g.visible) continue;
+        v.g.position.y = Math.abs(Math.sin(2 * Math.PI * STAGING.WORKER_BOB_HZ * t + v.phase)) * amp;
+        v.g.position.x = Math.sin(2 * Math.PI * STAGING.WORKER_BOB_HZ * 0.5 * t + v.phase) * 0.02;
+      }
+    }
+
+    function tick(clock: number) {
+      const t = clock / 1000;
+      // ease each freshly-added stage up into place (a gentle rise, no pop).
+      for (const key of stages) {
+        if (reaction[key] && appear[key] < 1) {
+          appear[key] = Math.min(1, appear[key] + STAGING.TICK_MS / STAGING.APPEAR_MS);
+        }
+        const e = 1 - (1 - appear[key]) * (1 - appear[key]); // ease-out
+        stageGroup[key].position.y = (1 - e) * -STAGING.APPEAR_RISE;
+      }
+      // drive each role-tagged light to match its stage's reaction.
+      for (const gp of glowParts) {
+        const r = reaction[gp.role];
+        if (!r) continue;
+        let v: number;
+        if (r === "thrive") v = STAGING.THRIVE_GLOW + STAGING.THRIVE_PULSE_AMP * Math.sin(2 * Math.PI * STAGING.THRIVE_PULSE_HZ * t);
+        else if (r === "neutral") v = STAGING.NEUTRAL_GLOW;
+        else v = STAGING.STRUGGLE_GLOW_MIN + (STAGING.STRUGGLE_GLOW_MAX - STAGING.STRUGGLE_GLOW_MIN) * flicker(t);
+        gp.mesh.material.emissiveIntensity = v * appear[gp.role];
+      }
+      // calm visitors: a slow bob + a gentle sway on whoever is present.
+      bobCrowd("booth", t);
+      bobCrowd("attraction", t);
+      bobCrowd("site", t);
+    }
+
+    reset();
+    return { group, reset, addStage, tick };
+  }
+
   const techStaging = buildTechStaging();
-  techScene.add(techStaging.group);
+  stopScenes["tech"].add(techStaging.group);
   stopStagings["tech"] = techStaging;
+
+  // Tourism Hub: the colonial village that assembles on the green as the student
+  // decides. Same { group, reset, addStage, tick } contract the runner drives.
+  const tourismStaging = buildTourismStaging();
+  stopScenes["tourism"].add(tourismStaging.group);
+  stopStagings["tourism"] = tourismStaging;
 
   // One shared loop animates whichever stop's staging is active. setInterval, not
   // rAF (which pauses in the headset). Idle on the hub, where nothing is built.
@@ -2551,8 +3295,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     for (const c of choiceCards) disablePressable(c);
     disablePressable(startBtn);
     disablePressable(nextBtn);
+    // Generic wrap-up: the runner is shared by every decision stop, so the line
+    // must not name one stop's build (it used to say "data center", which read
+    // wrong at the Tourism Hub). The per-stop flavor lives in the setup + notes.
     setRunnerPanel(
-      makeTextPanel("All set!", "You set up the data center. Press the button to return to the map.", RUNNER.INFO_W),
+      makeTextPanel("All set!", "You made all three choices. Press the button to return to the map.", RUNNER.INFO_W),
       RUNNER.CLOSE_PANEL_POS,
     );
     // Hand the real totals to the shell; finishStop reads pendingAward.
