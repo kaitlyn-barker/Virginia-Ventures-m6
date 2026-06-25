@@ -35,7 +35,7 @@ import {
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
 import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
-import { sfxStage, sfxClick, sfxCoin, sfxFanfare } from "./sfx";
+import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum } from "./sfx";
 
 // ============================================================================
 // ECONOMIC CONSTANTS  (carried over; the stages read these in later prompts)
@@ -358,6 +358,39 @@ const TECH_BUILD = {
     leaf: "#4f9a43",
     flow: "#8af3ff",
   },
+};
+
+// ============================================================================
+// TECH OFFICE — SERVER ROOM  (the place the build sits inside)
+// A calm server room wrapped AROUND the build: two rows of tall cabinets to the
+// sides and behind, a back wall with data screens. Every prop sits beyond the
+// build's sides (|x| > the table) and behind its front edge, so the room never
+// crosses in front of the decision panels (z ~3.3) or the build (z ~0.95). The
+// motion values are all slow on purpose (gentle blink + scroll, never a strobe).
+// ============================================================================
+const TECH_ROOM = {
+  FLOOR: "#28333f",       // cool slate floor
+  WALL: "#2b3a4a",        // cool blue-gray walls
+  CAB: "#1c2632",         // server cabinet body
+  CAB2: "#212e3c",        // alternate cabinet body, so rows are not flat
+  CAP: "#3b5168",         // cabinet top trim / screen bezel
+  DOT_CYAN: "#37d0e6",
+  DOT_GREEN: "#49e0a3",
+  DOT_AMBER: "#ffce54",
+  SCREEN_BG: "#0e2230",   // dark screen background
+  SCREEN_A: "#37d0e6",    // breathing data bars
+  SCREEN_B: "#49e0a3",    // scrolling log lines
+  ROW_X: 2.7,             // |x| of each cabinet row (build table half-width is ~1.45)
+  ROW_Z: [-1.0, -2.5, -4.0], // cabinets recede toward the back wall
+  CAB_W: 0.9,
+  CAB_H: 2.2,
+  CAB_D: 0.7,
+  WALL_Z: -5.2,           // back wall, well behind everything
+  SCREEN_X: 1.7,          // |x| of the two back-wall screens (inside the rows)
+  SCREEN_Y: 1.78,         // height of the screen centers
+  BLINK_HZ: [0.18, 0.26, 0.34], // a few slow blink rates, staggered across the dots
+  BAR_HZ: 0.3,            // how fast the screen bars breathe (cycles/sec)
+  SCROLL_SPEED: 0.12,     // m/s the screen log-lines drift upward
 };
 
 // ============================================================================
@@ -1742,6 +1775,10 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const pack = DECISION_PACKS[stop.id];
     if (pack) {
       showStopScene(stop.id);
+      // Start the room's quiet hum now the student is inside. Entering the stop
+      // was itself an interaction (the landmark press), so the AudioContext is
+      // already allowed to play. Only the Tech Office has a server room today.
+      if (stop.id === "tech") startHum();
       startDecisionPack(stop, pack);
       return;
     }
@@ -1765,6 +1802,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     if (finishBtn.object3D) finishBtn.object3D.visible = false;
     hideRunner();          // clear any runner panels / option cards
     hideAllStopScenes();   // and the calm per-stop backdrop
+    stopHum();             // fade out the room ambience as we leave
   }
 
   // ---- THE VISIT: enter on a landmark select, finish on the button ----
@@ -1858,75 +1896,161 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     mesh.renderOrder = 50000;
   }
 
-  // ---- A small calm BACKDROP per stop, so a decision does not feel like panels
-  // floating in a void. Only Tech Office has one for now; fuller scenery is a later
-  // pass. Props sit BEYOND the panels toward the back wall, never at the spawn. ----
-  function buildTechStopScene(): Group {
+  // ---- THE SERVER ROOM  —  the place the Tech Office build sits inside. Two
+  // rows of tall cabinets with slow-blinking status lights flank and back the
+  // build, and a back wall carries two data screens (one breathing bars, one
+  // scrolling log lines). Everything sits beyond the build's sides and behind
+  // its front edge, so it never crosses in front of the panels or the build.
+  // Returns its Group plus a tick(clock) the caller drives on setInterval (rAF
+  // pauses in the headset). Only Tech Office has a room today; other stops can
+  // build their own the same way. ----
+  function buildTechStopScene(): { group: Group; tick: (clock: number) => void } {
+    const R = TECH_ROOM;
     const g = new Group();
-    const FLOOR = "#28333f";     // cool slate floor
-    const WALL = "#33475c";      // cool blue-gray back wall
-    const RACK = "#1d2731";      // dark server racks
-    const TRIM = "#3b5168";
-    const GLOW = "#37d0e6";      // cyan status glow
-    const DESK = "#5a6b7c";
-    const SCREEN = "#123040";
 
-    // A floor under the standing area and the panels, so there is solid ground.
-    const floor = meshBox(11, 0.12, 13, FLOOR);
-    floor.position.set(0, -0.06, 1.5);
+    // animated bits, all serviced by tick()
+    const dots: { mesh: any; hz: number; phase: number; min: number; max: number }[] = [];
+    const bars: { mesh: any; bottomY: number; maxH: number; hz: number; phase: number }[] = [];
+    const lines: { mesh: any; topY: number; botY: number; speed: number }[] = [];
+
+    function emissive(mesh: any, color: string, intensity: number) {
+      mesh.material.emissive = new Color(color);
+      mesh.material.emissiveIntensity = intensity;
+      mesh.castShadow = false;
+      return mesh;
+    }
+
+    // floor + an enclosing wall on three sides, so it reads as a room not a void.
+    const floor = meshBox(12, 0.12, 13, R.FLOOR);
+    floor.position.set(0, -0.06, 1.0);
     g.add(floor);
-
-    // A back wall closes off the void behind the scene.
-    const wall = meshBox(11, 3.2, 0.2, WALL);
-    wall.position.set(0, 1.6, -5);
+    const wall = meshBox(12, 3.8, 0.2, R.WALL);
+    wall.position.set(0, 1.9, R.WALL_Z);
     g.add(wall);
+    for (const sx of [-5.4, 5.4]) {
+      const side = meshBox(0.2, 3.8, 11, R.WALL);
+      side.position.set(sx, 1.9, -1.4);
+      g.add(side);
+    }
 
-    // Two server racks flanking the back, each with a few glowing status strips.
-    for (const sx of [-3.3, 3.3]) {
-      const rack = meshBox(1.1, 2.0, 0.7, RACK);
-      rack.position.set(sx, 1.0, -4);
-      g.add(rack);
-      const trim = meshBox(1.14, 0.1, 0.74, TRIM);
-      trim.position.set(sx, 2.0, -4);
-      g.add(trim);
-      for (const ly of [1.4, 1.0, 0.6]) {
-        const strip = meshBox(0.8, 0.06, 0.02, GLOW);
-        strip.position.set(sx, ly, -3.64);
-        (strip.material as any).emissive = new Color(GLOW);
-        (strip.material as any).emissiveIntensity = 0.9;
-        g.add(strip);
+    // two rows of tall server cabinets, each studded with small status lights.
+    let di = 0;
+    for (const sgn of [-1, 1]) {
+      const x = sgn * R.ROW_X;
+      for (let r = 0; r < R.ROW_Z.length; r++) {
+        const z = R.ROW_Z[r];
+        const cab = meshBox(R.CAB_W, R.CAB_H, R.CAB_D, r % 2 === 0 ? R.CAB : R.CAB2);
+        cab.position.set(x, R.CAB_H / 2, z);
+        g.add(cab);
+        const cap = meshBox(R.CAB_W + 0.05, 0.08, R.CAB_D + 0.05, R.CAP);
+        cap.position.set(x, R.CAB_H, z);
+        cap.castShadow = false;
+        g.add(cap);
+        // status lights on the front (+z) face, a 2 x 4 grid, each blinking slowly.
+        const faceZ = z + R.CAB_D / 2 + 0.012;
+        const palette = [R.DOT_CYAN, R.DOT_GREEN, R.DOT_CYAN, R.DOT_AMBER, R.DOT_GREEN, R.DOT_CYAN, R.DOT_GREEN, R.DOT_CYAN];
+        let k = 0;
+        for (const dx of [-0.22, 0.22]) {
+          for (const dy of [0.5, 0.9, 1.3, 1.7]) {
+            const col = palette[k % palette.length];
+            const dot = meshBox(0.07, 0.07, 0.02, col);
+            dot.position.set(x + dx, dy, faceZ);
+            emissive(dot, col, 0.5);
+            dots.push({ mesh: dot, hz: R.BLINK_HZ[(di + k) % R.BLINK_HZ.length], phase: (di + k) * 1.7, min: 0.06, max: 0.85 });
+            g.add(dot);
+            k++;
+          }
+        }
+        // a soft steady seam of light down the inner edge of the cabinet.
+        const seam = meshBox(0.03, 1.5, 0.02, R.DOT_CYAN);
+        seam.position.set(x + (sgn < 0 ? 0.4 : -0.4), 1.15, faceZ);
+        emissive(seam, R.DOT_CYAN, 0.22);
+        g.add(seam);
+        di += k;
       }
     }
 
-    // A simple desk with a glowing monitor, to read as an office.
-    const desk = meshBox(2.0, 0.1, 0.8, DESK);
-    desk.position.set(0, 0.74, -2.4);
-    g.add(desk);
-    for (const lx of [-0.85, 0.85]) {
-      const leg = meshBox(0.1, 0.74, 0.1, TRIM);
-      leg.position.set(lx, 0.37, -2.4);
-      g.add(leg);
+    // a back-wall screen at cx; returns where to lay its data on the glass.
+    function screenPanel(cx: number) {
+      const sz = R.WALL_Z + 0.12;
+      const bezel = meshBox(1.9, 1.2, 0.04, R.CAP);
+      bezel.position.set(cx, R.SCREEN_Y, sz - 0.02);
+      bezel.castShadow = false;
+      g.add(bezel);
+      const panel = meshBox(1.8, 1.1, 0.06, R.SCREEN_BG);
+      panel.position.set(cx, R.SCREEN_Y, sz);
+      emissive(panel, R.SCREEN_BG, 0.25);
+      g.add(panel);
+      return { cx, sz: sz + 0.04, midY: R.SCREEN_Y };
     }
-    const stand = meshBox(0.1, 0.3, 0.1, TRIM);
-    stand.position.set(0, 0.94, -2.5);
-    g.add(stand);
-    const monitor = meshBox(0.95, 0.6, 0.06, RACK);
-    monitor.position.set(0, 1.28, -2.5);
-    g.add(monitor);
-    const screen = meshBox(0.82, 0.47, 0.02, SCREEN);
-    screen.position.set(0, 1.28, -2.46);
-    (screen.material as any).emissive = new Color(GLOW);
-    (screen.material as any).emissiveIntensity = 0.5;
-    g.add(screen);
 
-    return g;
+    // Screen A: a row of data bars that breathe up and down, gently.
+    {
+      const s = screenPanel(-R.SCREEN_X);
+      const bottomY = s.midY - 0.5;
+      const maxH = 0.86;
+      for (let i = 0; i < 7; i++) {
+        const col = i % 2 === 0 ? R.SCREEN_A : R.SCREEN_B;
+        const bar = meshBox(0.14, maxH, 0.03, col);
+        bar.position.set(s.cx - 0.66 + i * 0.22, bottomY + maxH / 2, s.sz);
+        emissive(bar, col, 0.7);
+        bars.push({ mesh: bar, bottomY, maxH, hz: R.BAR_HZ * (0.7 + 0.1 * i), phase: i * 0.9 });
+        g.add(bar);
+      }
+    }
+
+    // Screen B: log lines that scroll slowly upward and wrap around.
+    {
+      const s = screenPanel(R.SCREEN_X);
+      const topY = s.midY + 0.48;
+      const botY = s.midY - 0.48;
+      for (let i = 0; i < 5; i++) {
+        const col = i % 2 === 0 ? R.SCREEN_B : R.SCREEN_A;
+        const line = meshBox(1.45, 0.05, 0.03, col);
+        line.position.set(s.cx, botY + (i / 5) * (topY - botY), s.sz);
+        emissive(line, col, 0.6);
+        lines.push({ mesh: line, topY, botY, speed: R.SCROLL_SPEED * (0.8 + 0.1 * i) });
+        g.add(line);
+      }
+    }
+
+    // The gentle motion. Blinks are smooth sine fades (no hard on/off), bars
+    // breathe, lines drift. All slow; the caller ticks this on setInterval.
+    function tick(clock: number) {
+      const t = clock / 1000;
+      for (const d of dots) {
+        d.mesh.material.emissiveIntensity = d.min + (d.max - d.min) * (0.5 + 0.5 * Math.sin(2 * Math.PI * d.hz * t + d.phase));
+      }
+      for (const b of bars) {
+        const s = 0.18 + 0.78 * (0.5 + 0.5 * Math.sin(2 * Math.PI * b.hz * t + b.phase));
+        b.mesh.scale.y = s;
+        b.mesh.position.y = b.bottomY + (b.maxH * s) / 2;
+      }
+      const dt = STAGING.TICK_MS / 1000;
+      for (const l of lines) {
+        let y = l.mesh.position.y + l.speed * dt;
+        if (y > l.topY) y = l.botY;
+        l.mesh.position.y = y;
+      }
+    }
+
+    return { group: g, tick };
   }
 
   const stopScenes: { [id: string]: Group } = {};
-  const techScene = buildTechStopScene();
+  const techRoom = buildTechStopScene();
+  const techScene = techRoom.group;
   techScene.visible = false;
   scene.add(techScene);
   stopScenes["tech"] = techScene;
+
+  // Gently animate the server room while the student is in the Tech Office.
+  // setInterval, not rAF (rAF pauses in the headset); idle on the hub.
+  let roomClock = 0;
+  setInterval(function () {
+    roomClock += STAGING.TICK_MS;
+    if (currentView !== "hub" && activeStopId === "tech") techRoom.tick(roomClock);
+  }, STAGING.TICK_MS);
 
   function showStopScene(id: string) {
     for (const key in stopScenes) stopScenes[key].visible = key === id;
@@ -2377,7 +2501,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // A pick: add its effects to this stop's running tally, then show the readout.
   function onPick(opt: DecisionOption, optionIndex: number) {
-    sfxCoin();
+    sfxClick();                                                  // soft click on every pick
+    if ((opt.reaction || "neutral") === "thrive") sfxChime();    // a pleasant chime for a strong pick
     runnerTally.ei += opt.effects.ei;
     runnerTally.it += opt.effects.it;
     runnerTally.ps += opt.effects.ps;

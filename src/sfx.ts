@@ -75,3 +75,84 @@ export function sfxNotify() {
   note(587, 0.1, "sine", 0.12);
   note(784, 0.14, "sine", 0.12, 0.09);
 }
+
+// A short, pleasant chime for a strong ("thrive") pick. Soft ascending bells,
+// kept quiet and brief so it never startles.
+export function sfxChime() {
+  note(659.25, 0.18, "sine", 0.1, 0); // E5
+  note(987.77, 0.2, "sine", 0.1, 0.09); // B5
+  note(1318.51, 0.3, "triangle", 0.09, 0.18); // E6
+}
+
+// ----------------------------------------------------------------------------
+// AMBIENT HUM  —  a quiet server-room loop: a low electrical hum plus soft
+// filtered "fan" air. It loops until stopHum(). Like every sound here it can
+// only begin after a first interaction (the AudioContext rule), so the caller
+// starts it once the student is inside the stop. Soft on purpose (kids in a
+// headset). Gentle fade in and out so it never pops.
+// ----------------------------------------------------------------------------
+let humHandle: { gain: GainNode; sources: AudioScheduledSourceNode[] } | null = null;
+const HUM_LEVEL = 0.05; // master gain of the whole ambience (very soft)
+
+export function startHum() {
+  const ctx = getCtx();
+  if (!ctx || humHandle) return; // already humming, or no audio
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(HUM_LEVEL, ctx.currentTime + 1.2); // ease in
+  master.connect(ctx.destination);
+
+  const sources: AudioScheduledSourceNode[] = [];
+
+  // Low electrical hum: 60 Hz and its octave, the deeper one louder.
+  for (const f of [60, 120]) {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.value = f === 60 ? 0.6 : 0.22;
+    osc.connect(g).connect(master);
+    osc.start();
+    sources.push(osc);
+  }
+
+  // Soft "fan air": looped white noise through a low-pass, kept faint.
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 480;
+  const ng = ctx.createGain();
+  ng.gain.value = 0.35;
+  noise.connect(lp).connect(ng).connect(master);
+  noise.start();
+  sources.push(noise);
+
+  humHandle = { gain: master, sources };
+}
+
+export function stopHum() {
+  const ctx = getCtx();
+  if (!humHandle || !ctx) return;
+  const { gain, sources } = humHandle;
+  const t = ctx.currentTime;
+  try {
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); // ease out
+  } catch {
+    // ignore: context may be closing
+  }
+  for (const s of sources) {
+    try {
+      s.stop(t + 0.7);
+    } catch {
+      // already stopped
+    }
+  }
+  humHandle = null;
+}
