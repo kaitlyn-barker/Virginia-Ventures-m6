@@ -22,6 +22,9 @@ import {
   PanelUI,
   PanelDocument,
   Interactable,
+  DistanceGrabbable,
+  MovementMode,
+  Grabbed,
   Vector3,
   Box3,
   Group,
@@ -29,6 +32,8 @@ import {
   Mesh,
   PlaneGeometry,
   MeshBasicMaterial,
+  CanvasTexture,
+  SRGBColorSpace,
   DoubleSide,
 } from "@iwsdk/core";
 
@@ -840,6 +845,62 @@ const FARM_VALLEY = {
   BARN_POS: [-3.8, 0, -1.2] as [number, number, number],   // red barn to the left
   SILO_POS: [-3.0, 0, -1.7] as [number, number, number],   // silo beside the barn
   WINDMILL_POS: [3.6, 0, -1.7] as [number, number, number], // a wind pump to the right
+};
+
+// ============================================================================
+// PORT OF VIRGINIA  —  the signature stop's custom container-loading game (NOT a
+// decision pack). Three docked ships, each a destination + color; a dock shelf of
+// color-coded containers the student grabs (distance grab, the same ray they
+// already point with) and releases onto the matching ship. A correct ship loads
+// it with a happy cue; the wrong ship gently refuses and the container drifts
+// back to the dock. No choice ever fails. All positions are WORLD coordinates
+// (the student spawns near z = +7 and looks toward -z, so smaller z is farther
+// out over the water). The game reads ONLY this block; timers, the conveyor, and
+// real scoring arrive in later prompts.
+// ============================================================================
+const PORT = {
+  TICK_MS: 33,                 // every port loop runs on setInterval (rAF pauses in headset)
+  // ---- the three ships: a row across the dock on a gentle arc, each carrying a
+  // destination and a color. key drives BOTH the ship color and the matching
+  // container color, so the two can never drift apart.
+  SHIPS: [
+    { key: "europe", label: "EUROPE",        color: "#2f7fd0", pos: [-1.7, 0.0, 4.35] }, // blue
+    { key: "asia",   label: "ASIA",          color: "#d23b30", pos: [ 0.0, 0.0, 4.0 ] }, // red
+    { key: "usa",    label: "UNITED STATES", color: "#3fa64a", pos: [ 1.7, 0.0, 4.35] }, // green
+  ] as { key: string; label: string; color: string; pos: [number, number, number] }[],
+  SHIP_HULL_W: 1.5, SHIP_HULL_H: 0.55, SHIP_HULL_D: 0.95,  // low-poly hull box
+  DECK_Y: 0.72,                // world y of the deck top (where a loaded box would sit)
+  WATER_Y: 0.05,              // harbor water top (the ships sit in it)
+  BOB_HZ: 0.16, BOB_AMP: 0.03, // a very gentle ship bob (slow; nothing lurches)
+  PULSE_FALL: 0.06,            // how fast the "loaded!" gold glow on a ship eases away
+  // ---- each ship's drop zone: a generous box (really an angular sector) so a
+  // released container near the right ship loads even when the aim is a little off.
+  ZONE_W: 1.5, ZONE_H: 1.9,  // X width picks WHICH ship; Y is a loose drop window (Z is not gated)
+  ZONE_CENTER_Y: 0.95,
+  // ---- the container supply: a fixed handful on a dock shelf in front of the
+  // student that recycles, so a few are always available (the conveyor comes later).
+  CONTAINER: 0.34,            // container cube size (m)
+  SLOTS: [                    // dock-shelf slots (world pos), in easy view ahead of the spawn
+    [-1.5, 1.0, 5.6], [-0.75, 1.0, 5.6], [0.0, 1.0, 5.6], [0.75, 1.0, 5.6], [1.5, 1.0, 5.6],
+  ] as [number, number, number][],
+  SHELF_Y: 0.78, SHELF_W: 3.9, SHELF_D: 0.74, SHELF_Z: 5.6,  // plank shelf the resting containers sit on
+  START_COLORS: ["europe", "asia", "usa", "asia", "europe"], // a spread of all three to begin
+  REFILL_CYCLE: ["usa", "europe", "asia"],                   // refill an emptied slot, cycling colors
+  PARK_Y: -100,              // a loaded container parks far below the world: invisible AND out of any aim
+  // ---- distance-grab feel: the held container floats this far out along the aim,
+  // about the dock-to-ship distance, so pointing at a ship carries it onto that ship.
+  GRAB_REACH: 2.7,           // targetPositionOffset distance (m in front of the controller)
+  GRAB_SPEED: 0.5,           // how briskly the held container tracks the aim (0..1)
+  RETURN_MS: 280,            // a wrong / empty drop eases back to its shelf slot over this
+  REFILL_MS: 460,            // a beat after a load before a fresh container appears in the slot
+  TINT_FALL: 0.05,           // how fast the red "wrong ship" blink on a container fades
+  // ---- the dock + harbor backdrop ----
+  DOCK_COLOR: "#9c7b4f", DOCK_TRIM: "#7d6038", PILING: "#5e4a30",
+  WATER_COLOR: "#2b6c8f", WATER_SHIMMER: 0.1, WATER_HZ: 0.05,
+  CRANE: "#c8543a", CRANE_LEG: "#9a9ea3",   // distant dock cranes, harbor flavor only
+  // ---- the TEMPORARY debug count readout (replaced by real scoring later) ----
+  DEBUG_POS: [-2.35, 2.25, 4.9] as [number, number, number],
+  DEBUG_W: 1.15, DEBUG_H: 0.92,
 };
 
 // ============================================================================
@@ -2217,6 +2278,10 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   if (finishBtn.object3D) finishBtn.object3D.visible = false;
   let finishWasPressed = false;
 
+  // The Port of Virginia's custom game controller, built once below (after its
+  // scene is registered) and driven by showStop/hideStop + its own loop.
+  let portGame: { group: Group; start: () => void; stop: () => void; tick: () => void } | null = null;
+
   function showStop(stop: any) {
     // A stop with a decision pack runs through the reusable RUNNER (its own calm
     // scene, setup line, decisions, readout, and the shared finish button). Stops
@@ -2233,6 +2298,17 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       else if (stop.id === "tourism") startVillageAmbience();
       else if (stop.id === "farm") startFarmAmbience();
       startDecisionPack(stop, pack);
+      return;
+    }
+    // The Port of Virginia is the SIGNATURE stop: a custom container-loading game,
+    // not a decision pack. Show its dock scene, start the game, and reveal the
+    // shared Finish button as a TEMPORARY return while the game is built out. With
+    // no pendingAward set, Finish completes the port with VISIT.PLACEHOLDER_AWARD;
+    // real scoring replaces that in a later prompt.
+    if (stop.id === "port") {
+      showStopScene("port");
+      if (portGame) portGame.start();
+      if (finishBtn.object3D) finishBtn.object3D.visible = true;
       return;
     }
     // Rebuild the description for THIS stop (cheap, and it happens under full cover).
@@ -2254,6 +2330,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     stopHolder.visible = false;
     if (finishBtn.object3D) finishBtn.object3D.visible = false;
     hideRunner();          // clear any runner panels / option cards
+    if (portGame) portGame.stop(); // park the Port's ships + grabbable containers
     hideAllStopScenes();   // and the calm per-stop backdrop
     stopHum();             // fade out the Tech Office room ambience as we leave
     stopVillageAmbience(); // fade out the Tourism village ambience as we leave
@@ -3885,6 +3962,377 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const farmStaging = buildFarmStaging();
   stopScenes["farm"].add(farmStaging.group);
   stopStagings["farm"] = farmStaging;
+
+  // ======================================================================
+  // PORT OF VIRGINIA  —  the signature stop's custom container-loading game.
+  // buildPortScene() is the calm dock + harbor backdrop (registered like the other
+  // stops' scenes). buildPortGame() is the game: three ships, a recycling supply of
+  // grabbable color-coded containers, and the match-and-load loop. The student grabs
+  // a container with the SAME ray they point with (DistanceGrabbable, MoveTowardsTarget):
+  // it floats out along the aim about as far as the ships, so pointing at a ship
+  // carries it there; releasing over the MATCHING ship loads it (chime + the ship
+  // glows gold), the wrong ship gently refuses (a soft click + a red blink, then it
+  // drifts back), and an open-water drop just floats home. No choice ever fails.
+  // Every loop is setInterval (rAF pauses in the headset).
+  // ======================================================================
+
+  // A small readable sign baked on a canvas (DOM panels do not show in the headset),
+  // used for each ship's destination label. Front faces +Z, toward the student.
+  function portSign(text: string, accent: string): Mesh {
+    const W = 384, H = 132;
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+    ctx.fillStyle = "#fbf3dd";
+    ctx.fillRect(6, 6, W - 12, H - 12);
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = accent;
+    ctx.strokeRect(6, 6, W - 12, H - 12);
+    ctx.fillStyle = "#1F3A5F";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let size = 58;
+    do { ctx.font = "bold " + size + "px sans-serif"; size -= 2; }
+    while (ctx.measureText(text).width > W - 44 && size > 16);
+    ctx.fillText(text, W / 2, H / 2 + 2);
+    const tex = new CanvasTexture(c);
+    tex.colorSpace = SRGBColorSpace;
+    return new Mesh(
+      new PlaneGeometry(0.7, 0.24),
+      new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+    );
+  }
+
+  // The calm backdrop: a wood dock underfoot, open harbor water the ships sit in,
+  // and a few distant cranes for flavor. The water shimmers very slowly in tick().
+  function buildPortScene(): { group: Group; tick: (clock: number) => void } {
+    const g = new Group();
+    const water = meshBox(40, 0.1, 40, PORT.WATER_COLOR);
+    water.position.set(0, PORT.WATER_Y, -6);
+    (water.material as any).emissive = new Color(PORT.WATER_COLOR);
+    (water.material as any).emissiveIntensity = 0;
+    g.add(water);
+    // the dock the student stands on, with a darker trim lip and a row of pilings.
+    const dock = meshBox(7.6, 0.16, 5.4, PORT.DOCK_COLOR);
+    dock.position.set(0, -0.02, 6.0);
+    g.add(dock);
+    const trim = meshBox(7.8, 0.08, 0.22, PORT.DOCK_TRIM);
+    trim.position.set(0, 0.06, 3.3);
+    g.add(trim);
+    for (const px of [-3.5, -1.2, 1.2, 3.5]) {
+      const pile = meshCyl(0.12, 0.12, 1.1, PORT.PILING);
+      pile.position.set(px, -0.35, 3.3);
+      g.add(pile);
+    }
+    // a plank shelf the supply of containers rests on, so they read as cargo on the
+    // pier rather than floating boxes; two legs carry it down to the dock.
+    const shelf = meshBox(PORT.SHELF_W, 0.12, PORT.SHELF_D, PORT.DOCK_TRIM);
+    shelf.position.set(0, PORT.SHELF_Y, PORT.SHELF_Z);
+    g.add(shelf);
+    for (const lx of [-1.7, 1.7]) {
+      const leg = meshBox(0.14, PORT.SHELF_Y, 0.14, PORT.PILING);
+      leg.position.set(lx, PORT.SHELF_Y / 2, PORT.SHELF_Z);
+      g.add(leg);
+    }
+    // distant dock cranes, well past the ships and never in reach.
+    for (const cx of [-4.7, -2.4, 2.5, 4.7]) {
+      const crane = new Group();
+      for (const lx of [-0.4, 0.4]) {
+        const leg = meshBox(0.12, 2.6, 0.12, PORT.CRANE_LEG);
+        leg.position.set(lx, 1.3, 0);
+        crane.add(leg);
+      }
+      const top = meshBox(1.0, 0.16, 0.16, PORT.CRANE);
+      top.position.set(0, 2.5, 0);
+      crane.add(top);
+      const arm = meshBox(0.16, 0.16, 2.0, PORT.CRANE);
+      arm.position.set(0, 2.5, 0.9);
+      crane.add(arm);
+      crane.position.set(cx, 0, -2.8);
+      g.add(crane);
+    }
+    function tick(clock: number) {
+      const s = (Math.sin(clock * 0.001 * Math.PI * 2 * PORT.WATER_HZ) * 0.5 + 0.5) * PORT.WATER_SHIMMER;
+      (water.material as any).emissiveIntensity = s;
+    }
+    return { group: g, tick };
+  }
+
+  // One low-poly ship: a colored hull, a deck rim, a stern wheelhouse, a mast with a
+  // destination-colored flag, and a destination label facing the student. The group
+  // sits at the ship's dock position; the game's tick() bobs and pulses it.
+  function buildShip(ship: { key: string; label: string; color: string; pos: [number, number, number] }) {
+    const g = new Group();
+    const H = PORT.SHIP_HULL_H;
+    const hull = meshBox(PORT.SHIP_HULL_W, H, PORT.SHIP_HULL_D, ship.color);
+    hull.position.set(0, PORT.DECK_Y - H / 2, 0);
+    (hull.material as any).emissive = new Color("#ffd76a"); // gold "loaded!" pulse, intensity set in tick
+    (hull.material as any).emissiveIntensity = 0;
+    g.add(hull);
+    const rim = meshBox(PORT.SHIP_HULL_W * 0.9, 0.07, PORT.SHIP_HULL_D * 0.9, "#363b41");
+    rim.position.set(0, PORT.DECK_Y + 0.035, 0);
+    g.add(rim);
+    const cabin = meshBox(PORT.SHIP_HULL_W * 0.46, 0.32, 0.34, "#eae3d2");
+    cabin.position.set(0, PORT.DECK_Y + 0.19, PORT.SHIP_HULL_D * 0.32);
+    g.add(cabin);
+    const mast = meshCyl(0.025, 0.025, 0.7, "#6d5636");
+    mast.position.set(0, PORT.DECK_Y + 0.5, PORT.SHIP_HULL_D * 0.32);
+    g.add(mast);
+    const flag = meshBox(0.32, 0.2, 0.02, ship.color);
+    flag.position.set(0.18, PORT.DECK_Y + 0.72, PORT.SHIP_HULL_D * 0.32);
+    g.add(flag);
+    const sign = portSign(ship.label, ship.color);
+    sign.position.set(0, PORT.DECK_Y + 0.5, 0.02);
+    g.add(sign);
+    g.position.set(ship.pos[0], 0, ship.pos[2]);
+    return { group: g, hull };
+  }
+
+  function buildPortGame() {
+    const group = new Group();   // ships + the debug panel live here (hide with the scene)
+    let portClock = 0;
+
+    // a container's color is exactly its destination ship's color (one source of truth).
+    const colorByKey: Record<string, string> = {};
+    for (const s of PORT.SHIPS) colorByKey[s.key] = s.color;
+
+    // ---- the three ships + their fixed drop zones (world space; the group is identity) ----
+    const ships: { key: string; x: number; z: number; group: Group; hull: any; pulse: number }[] = [];
+    for (const s of PORT.SHIPS) {
+      const built = buildShip(s);
+      group.add(built.group);
+      ships.push({ key: s.key, x: s.pos[0], z: s.pos[2], group: built.group, hull: built.hull, pulse: 0 });
+    }
+
+    // ---- the TEMPORARY debug count readout (a canvas panel; real scoring replaces it) ----
+    const counts: Record<string, number> = { europe: 0, asia: 0, usa: 0 };
+    const panelCanvas = document.createElement("canvas");
+    panelCanvas.width = 512; panelCanvas.height = 410;
+    const pctx = panelCanvas.getContext("2d") as CanvasRenderingContext2D;
+    const panelTex = new CanvasTexture(panelCanvas);
+    panelTex.colorSpace = SRGBColorSpace;
+    const panelMesh = new Mesh(
+      new PlaneGeometry(PORT.DEBUG_W, PORT.DEBUG_H),
+      new MeshBasicMaterial({ map: panelTex, transparent: true, side: DoubleSide }),
+    );
+    (panelMesh.material as any).depthTest = false;
+    (panelMesh.material as any).depthWrite = false;
+    panelMesh.renderOrder = 50000;
+    panelMesh.position.set(PORT.DEBUG_POS[0], PORT.DEBUG_POS[1], PORT.DEBUG_POS[2]);
+    group.add(panelMesh);
+    function drawCounts() {
+      const W = 512, Hh = 410;
+      pctx.clearRect(0, 0, W, Hh);
+      pctx.fillStyle = "#fbf3dd";
+      pctx.fillRect(8, 8, W - 16, Hh - 16);
+      pctx.lineWidth = 10;
+      pctx.strokeStyle = "#caa24a";
+      pctx.strokeRect(8, 8, W - 16, Hh - 16);
+      pctx.fillStyle = "#1F3A5F";
+      pctx.textBaseline = "middle";
+      pctx.textAlign = "left";
+      pctx.font = "bold 38px sans-serif";
+      pctx.fillText("LOADED (debug)", 34, 54);
+      const rows: [string, string][] = [["Europe", "europe"], ["Asia", "asia"], ["United States", "usa"]];
+      let y = 128;
+      for (const [label, key] of rows) {
+        pctx.fillStyle = colorByKey[key];
+        pctx.fillRect(34, y - 20, 40, 40);
+        pctx.fillStyle = "#1F3A5F";
+        pctx.font = "bold 34px sans-serif";
+        pctx.textAlign = "left";
+        pctx.fillText(label, 88, y);
+        pctx.textAlign = "right";
+        pctx.fillText(String(counts[key] || 0), W - 40, y);
+        y += 66;
+      }
+      const total = (counts.europe || 0) + (counts.asia || 0) + (counts.usa || 0);
+      pctx.fillStyle = "#7d6038";
+      pctx.fillRect(34, y - 14, W - 68, 4);
+      pctx.fillStyle = "#1F3A5F";
+      pctx.font = "bold 40px sans-serif";
+      pctx.textAlign = "left";
+      pctx.fillText("Total", 88, y + 34);
+      pctx.textAlign = "right";
+      pctx.fillText(String(total), W - 40, y + 34);
+      panelTex.needsUpdate = true;
+    }
+
+    // ---- the recycling container supply ----
+    // Each container is a cube ENTITY made grabbable once (DistanceGrabbable). We
+    // never tear the grab down (the internal Handle is not exported, and re-adding
+    // would not rebuild it), so we control grabbability by PLACEMENT instead: an idle
+    // container sits on its dock slot in easy aim; a loaded one parks far below the
+    // world (invisible AND unreachable by any forward aim) until its slot refills.
+    type Cont = {
+      entity: any; mesh: any; key: string; slot: number; state: string; wasGrabbed: boolean;
+      fx: number; fy: number; fz: number; t: number; dur: number; tint: number; timer: number;
+    };
+    // The student points the ray at a container and pulls the trigger to grab it; the
+    // cube floats out along the aim about as far as the ships (GRAB_REACH), so aiming
+    // at a ship carries it there. Rotation/scale are locked so the cube stays upright
+    // and its color stays readable; it stays where released (we handle load / return).
+    const GRAB_OPTS = {
+      movementMode: MovementMode.MoveTowardsTarget,
+      rotate: false, translate: true, scale: false,
+      returnToOrigin: false, detachOnGrab: false,
+      moveSpeedFactor: PORT.GRAB_SPEED,
+      targetPositionOffset: [0, 0, -PORT.GRAB_REACH] as [number, number, number],
+    };
+    const conts: Cont[] = [];
+    for (let i = 0; i < PORT.SLOTS.length; i++) {
+      const mesh = meshBox(PORT.CONTAINER, PORT.CONTAINER, PORT.CONTAINER, "#ffffff");
+      (mesh.material as any).emissive = new Color("#d23b30"); // red "wrong ship" blink, intensity in tick
+      (mesh.material as any).emissiveIntensity = 0;
+      mesh.visible = false;
+      mesh.position.set(0, PORT.PARK_Y, 0);
+      const entity = world.createTransformEntity(mesh).addComponent(DistanceGrabbable, GRAB_OPTS);
+      conts.push({ entity, mesh, key: "europe", slot: i, state: "parked", wasGrabbed: false,
+                   fx: 0, fy: 0, fz: 0, t: 0, dur: 0, tint: 0, timer: 0 });
+    }
+
+    let refillIdx = 0;
+    function nextRefillColor(): string {
+      const k = PORT.REFILL_CYCLE[refillIdx % PORT.REFILL_CYCLE.length];
+      refillIdx++;
+      return k;
+    }
+    function recolor(ct: Cont, key: string) {
+      ct.key = key;
+      (ct.mesh.material as any).color = new Color(colorByKey[key]);
+    }
+    function park(ct: Cont) {              // hide a container far below the world: gone AND ungrabbable
+      ct.state = "parked"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
+      (ct.mesh.material as any).emissiveIntensity = 0;
+      ct.mesh.visible = false;
+      ct.mesh.position.set(0, PORT.PARK_Y, 0);
+      ct.wasGrabbed = false;
+    }
+    function toSlot(ct: Cont) {            // set a container idle + grabbable on its dock slot
+      const sp = PORT.SLOTS[ct.slot];
+      ct.state = "idle"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
+      (ct.mesh.material as any).emissiveIntensity = 0;
+      ct.mesh.position.set(sp[0], sp[1], sp[2]);
+      ct.mesh.visible = true;
+      ct.wasGrabbed = !!ct.entity.hasComponent(Grabbed); // never fire on a carried-over grab
+    }
+    function startReturn(ct: Cont) {       // ease a wrong / open-water drop back to its slot
+      const wp = new Vector3(); ct.mesh.getWorldPosition(wp);
+      ct.fx = wp.x; ct.fy = wp.y; ct.fz = wp.z;
+      ct.t = 0; ct.dur = PORT.RETURN_MS; ct.state = "returning";
+    }
+
+    // A release: read the container's world position and find the ship whose drop
+    // zone holds it (nearest in x among the boxes). Match => load; wrong => gently
+    // refuse; none => float home. This owns the cue and the count.
+    function onRelease(ct: Cont) {
+      const wp = new Vector3(); ct.mesh.getWorldPosition(wp);
+      // Pick the ship the student aimed at: nearest in X (which ship), within a
+      // generous X width and a loose height window. We deliberately do NOT gate on Z
+      // (how far the throw travelled): the destination is decided by which ship you
+      // point at, so a relaxed Z keeps the match forgiving for a kid's loose aim.
+      let best: any = null;
+      let bestdx = Infinity;
+      for (const sh of ships) {
+        const dx = Math.abs(wp.x - sh.x);
+        const dy = Math.abs(wp.y - PORT.ZONE_CENTER_Y);
+        if (dx <= PORT.ZONE_W / 2 && dy <= PORT.ZONE_H / 2 && dx < bestdx) {
+          best = sh; bestdx = dx;
+        }
+      }
+      if (best && best.key === ct.key) {
+        sfxChime();                        // a clear, happy "loaded!"
+        counts[best.key] = (counts[best.key] || 0) + 1;
+        best.pulse = 1;                    // the ship glows gold, eased down in tick
+        drawCounts();
+        park(ct);                          // it snaps aboard and is gone from the dock...
+        ct.state = "loaded"; ct.timer = PORT.REFILL_MS; // ...and a fresh one refills the slot shortly
+        console.log("[PORT] loaded " + ct.key + " => totals", { ...counts });
+      } else if (best) {
+        sfxClick();                        // a soft, gentle "not that ship"
+        ct.tint = 1;                       // a brief red blink, eased down in tick
+        startReturn(ct);
+        console.log("[PORT] wrong ship: " + ct.key + " over " + best.key);
+      } else {
+        startReturn(ct);                   // open water: no penalty, just float home
+      }
+    }
+
+    function tick() {
+      // gentle ship bob + the gold "loaded!" pulse easing away.
+      for (const sh of ships) {
+        sh.group.position.y = Math.sin(portClock * 0.001 * Math.PI * 2 * PORT.BOB_HZ + sh.x) * PORT.BOB_AMP;
+        if (sh.pulse > 0) {
+          sh.pulse = Math.max(0, sh.pulse - PORT.PULSE_FALL);
+          (sh.hull.material as any).emissiveIntensity = sh.pulse * 0.7;
+        }
+      }
+      for (const ct of conts) {
+        if (ct.state === "returning") {
+          // a re-grab mid-flight wins: hand control back to the grab system.
+          if (ct.entity.hasComponent(Grabbed)) {
+            ct.dur = 0; ct.state = "idle"; ct.wasGrabbed = true;
+          } else {
+            ct.t = Math.min(ct.dur, ct.t + PORT.TICK_MS);
+            const k = ct.dur > 0 ? ct.t / ct.dur : 1;
+            const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOut
+            const sp = PORT.SLOTS[ct.slot];
+            ct.mesh.position.set(
+              ct.fx + (sp[0] - ct.fx) * e,
+              ct.fy + (sp[1] - ct.fy) * e,
+              ct.fz + (sp[2] - ct.fz) * e,
+            );
+            if (ct.t >= ct.dur) toSlot(ct);
+          }
+        }
+        if (ct.tint > 0) {
+          ct.tint = Math.max(0, ct.tint - PORT.TINT_FALL);
+          (ct.mesh.material as any).emissiveIntensity = ct.tint * 0.85;
+        }
+        if (ct.state === "loaded" && ct.timer > 0) {
+          ct.timer -= PORT.TICK_MS;
+          if (ct.timer <= 0) { recolor(ct, nextRefillColor()); toSlot(ct); }
+        }
+        // a container is grabbable while idle or returning; watch for the release.
+        if (ct.state === "idle" || ct.state === "returning") {
+          const grabbed = !!ct.entity.hasComponent(Grabbed);
+          if (ct.wasGrabbed && !grabbed) onRelease(ct);
+          ct.wasGrabbed = grabbed;
+        }
+      }
+    }
+
+    function start() {
+      portClock = 0; refillIdx = 0;
+      counts.europe = 0; counts.asia = 0; counts.usa = 0;
+      drawCounts();
+      for (const sh of ships) { sh.pulse = 0; sh.group.position.y = 0; (sh.hull.material as any).emissiveIntensity = 0; }
+      for (let i = 0; i < conts.length; i++) {
+        const ct = conts[i];
+        ct.slot = i;
+        recolor(ct, PORT.START_COLORS[i % PORT.START_COLORS.length]);
+        toSlot(ct);
+      }
+    }
+    function stop() {
+      for (const ct of conts) park(ct); // hidden + unreachable, so nothing leaks back to the hub
+    }
+
+    // The game's own loop: bob, eases, refill timers, and release detection. Gated so
+    // it is idle unless the student is actually standing in the port. setInterval, not
+    // rAF (which pauses in the headset), like every other loop in the build.
+    setInterval(function () {
+      if (currentView !== "stop" || activeStopId !== "port") return;
+      portClock += PORT.TICK_MS;
+      tick();
+    }, PORT.TICK_MS);
+
+    return { group, start, stop, tick };
+  }
+
+  registerStopScene("port", buildPortScene()); // the Norfolk dock + harbor water
+  portGame = buildPortGame();
+  stopScenes["port"].add(portGame.group);       // ships + debug panel hide with the scene
 
   // One shared loop animates whichever stop's staging is active. setInterval, not
   // rAF (which pauses in the headset). Idle on the hub, where nothing is built.
