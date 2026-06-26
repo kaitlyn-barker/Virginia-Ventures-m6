@@ -22,9 +22,6 @@ import {
   PanelUI,
   PanelDocument,
   Interactable,
-  DistanceGrabbable,
-  MovementMode,
-  Grabbed,
   Vector3,
   Box3,
   Group,
@@ -873,10 +870,13 @@ const PORT = {
   WATER_Y: 0.05,              // harbor water top (the ships sit in it)
   BOB_HZ: 0.16, BOB_AMP: 0.03, // a very gentle ship bob (slow; nothing lurches)
   PULSE_FALL: 0.06,            // how fast the "loaded!" gold glow on a ship eases away
-  // ---- each ship's drop zone: a generous box (really an angular sector) so a
-  // released container near the right ship loads even when the aim is a little off.
-  ZONE_W: 1.5, ZONE_H: 1.9,  // X width picks WHICH ship; Y is a loose drop window (Z is not gated)
-  ZONE_CENTER_Y: 0.95,
+  // ---- the clickable ship target: a generous, invisible hit-pad around each ship the
+  // student taps to send the selected container. Kept SHORT (its top sits below the ray
+  // to the Finish button, which lines up directly behind the green ship) so aiming at a
+  // ship never steals a Finish press. Wider than the hull so a kid's aim lands easily.
+  PAD_W: 1.5, PAD_H: 0.9, PAD_D: 1.05,  // hit-pad size (m); short on purpose (see above)
+  PAD_Y: 0.4,                           // hit-pad center height; top ~0.85 stays under the Finish ray
+  SHIP_HOVER_GLOW: 0.28,                // faint gold on a ship while the ray rests on it
   // ---- the container supply: a fixed handful on a dock shelf in front of the
   // student that recycles, so a few are always available (the conveyor comes later).
   CONTAINER: 0.34,            // container cube size (m)
@@ -887,11 +887,20 @@ const PORT = {
   START_COLORS: ["europe", "asia", "usa", "asia", "europe"], // a spread of all three to begin
   REFILL_CYCLE: ["usa", "europe", "asia"],                   // refill an emptied slot, cycling colors
   PARK_Y: -100,              // a loaded container parks far below the world: invisible AND out of any aim
-  // ---- distance-grab feel: the held container floats this far out along the aim,
-  // about the dock-to-ship distance, so pointing at a ship carries it onto that ship.
-  GRAB_REACH: 2.7,           // targetPositionOffset distance (m in front of the controller)
-  GRAB_SPEED: 0.5,           // how briskly the held container tracks the aim (0..1)
-  RETURN_MS: 280,            // a wrong / empty drop eases back to its shelf slot over this
+  // ---- tap-to-select + fly feel ----  A tapped container lifts and glows so it is
+  // clearly the chosen one; tapping a ship then sends it on a smooth arc to the deck.
+  SELECT_LIFT: 0.18,         // how far a selected container rises above its slot (m)
+  SELECT_HOVER_AMP: 0.015, SELECT_HOVER_HZ: 0.5, // a tiny, calm hover while selected (never a flash)
+  SELECT_GLOW: "#fff0b8",    // warm gold selection glow (reads over the blue/red/green cubes)
+  SELECT_GLOW_MIN: 0.32, SELECT_GLOW_MAX: 0.68,  // the selection glow breathes gently between these
+  WRONG_GLOW: "#d23b30",     // the red "wrong ship" blink color
+  HOVER_SCALE: 1.08,         // an idle container grows a touch while the ray rests on it
+  FLIGHT_MS: 520,            // how long a container's arc to a ship takes (smooth, not slow)
+  FLIGHT_ARC: 0.6,           // peak extra height of the flight arc (m), eased up then down
+  // ---- the empty-water deselect catcher: a big invisible plane BEHIND every ship, so a
+  // tap on open water (past the containers and ships) lands here and clears the selection.
+  CATCH_Z: 1.5, CATCH_Y: 2.5, CATCH_W: 16, CATCH_H: 12,
+  RETURN_MS: 280,            // a wrong ship eases the container back to its shelf slot over this
   REFILL_MS: 460,            // a beat after a load before a fresh container appears in the slot
   TINT_FALL: 0.05,           // how fast the red "wrong ship" blink on a container fades
   // ---- the dock + harbor backdrop ----
@@ -901,6 +910,15 @@ const PORT = {
   // ---- the TEMPORARY debug count readout (replaced by real scoring later) ----
   DEBUG_POS: [-2.35, 2.25, 4.9] as [number, number, number],
   DEBUG_W: 1.15, DEBUG_H: 0.92,
+  // ---- on-arrival DIRECTIONS (guidance only; mechanic/count/timers are untouched) ----
+  // An intro panel + Start button explain the goal, then a short hint follows the play.
+  // All sit ABOVE the dock and draw on top (depthTest off), so they never cover the ships,
+  // containers, or count; text redraws only on a state change, so nothing flashes. The
+  // intro rides the calm, comfortable runner depth (z~3.3); the Start button rides its
+  // lower margin; the hint floats just above the shelf, clear of the centre ship's mast.
+  INTRO_POS: [0, 2.45, 3.3] as [number, number, number], INTRO_W: 2.1,
+  START_POS: [0, 2.04, 3.2] as [number, number, number], START_W: 0.95, START_H: 0.26,
+  HINT_POS: [0, 1.9, 5.7] as [number, number, number], HINT_W: 1.8, HINT_H: 0.34,
 };
 
 // ============================================================================
@@ -3967,38 +3985,46 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // PORT OF VIRGINIA  —  the signature stop's custom container-loading game.
   // buildPortScene() is the calm dock + harbor backdrop (registered like the other
   // stops' scenes). buildPortGame() is the game: three ships, a recycling supply of
-  // grabbable color-coded containers, and the match-and-load loop. The student grabs
-  // a container with the SAME ray they point with (DistanceGrabbable, MoveTowardsTarget):
-  // it floats out along the aim about as far as the ships, so pointing at a ship
-  // carries it there; releasing over the MATCHING ship loads it (chime + the ship
-  // glows gold), the wrong ship gently refuses (a soft click + a red blink, then it
-  // drifts back), and an open-water drop just floats home. No choice ever fails.
-  // Every loop is setInterval (rAF pauses in the headset).
+  // color-coded containers, and the match-and-load loop. The interaction is the SAME
+  // point-and-click the map landmarks and the choice cards use (Interactable + a fresh
+  // Pressed edge), so it is reliable and familiar: TAP a container to select it (it
+  // lifts and glows; tapping it again or empty water deselects), then TAP a ship to
+  // send it flying there in a smooth arc. Reaching the MATCHING ship loads it (chime +
+  // the ship glows gold and its count goes up); the wrong ship gently refuses (a soft
+  // click + a red blink) and the container flies back to its slot, no penalty. Only one
+  // container is selected and in flight at a time. Every loop and animation is
+  // setInterval (rAF pauses in the headset).
   // ======================================================================
 
   // A small readable sign baked on a canvas (DOM panels do not show in the headset),
   // used for each ship's destination label. Front faces +Z, toward the student.
   function portSign(text: string, accent: string): Mesh {
-    const W = 384, H = 132;
+    const W = 460, H = 170;
     const c = document.createElement("canvas");
     c.width = W; c.height = H;
     const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+    // Parchment card, so the dark place name reads clearly against the same-color hull.
     ctx.fillStyle = "#fbf3dd";
-    ctx.fillRect(6, 6, W - 12, H - 12);
-    ctx.lineWidth = 10;
+    ctx.fillRect(8, 8, W - 16, H - 16);
+    // A thick border AND a bold bottom bar in the SHIP'S COLOR, tying the destination name
+    // to the color the student must match (the hull, flag, and containers all share it).
+    ctx.lineWidth = 14;
     ctx.strokeStyle = accent;
-    ctx.strokeRect(6, 6, W - 12, H - 12);
-    ctx.fillStyle = "#1F3A5F";
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.fillStyle = accent;
+    ctx.fillRect(22, H - 44, W - 44, 24);
+    // The place name: big, bold, high-contrast navy, shrunk to fit the longest label.
+    ctx.fillStyle = "#14253c";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    let size = 58;
+    let size = 74;
     do { ctx.font = "bold " + size + "px sans-serif"; size -= 2; }
-    while (ctx.measureText(text).width > W - 44 && size > 16);
-    ctx.fillText(text, W / 2, H / 2 + 2);
+    while (ctx.measureText(text).width > W - 60 && size > 16);
+    ctx.fillText(text, W / 2, H / 2 - 8);
     const tex = new CanvasTexture(c);
     tex.colorSpace = SRGBColorSpace;
     return new Mesh(
-      new PlaneGeometry(0.7, 0.24),
+      new PlaneGeometry(0.82, 0.30),
       new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
     );
   }
@@ -4096,13 +4122,41 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const colorByKey: Record<string, string> = {};
     for (const s of PORT.SHIPS) colorByKey[s.key] = s.color;
 
-    // ---- the three ships + their fixed drop zones (world space; the group is identity) ----
-    const ships: { key: string; x: number; z: number; group: Group; hull: any; pulse: number }[] = [];
+    // ---- the three ships, each with an invisible hit-pad the student TAPS to send the
+    // selected container. The pad is its OWN entity (createTransformEntity reparents it to
+    // the scene root), invisible (opacity 0) yet still a ray target; start()/stop() toggle
+    // its visibility so it is tappable only inside the port and never blocks the hub. ----
+    const ships: {
+      key: string; x: number; z: number; group: Group; hull: any; pulse: number;
+      pad: any; padMesh: any; padWasPressed: boolean;
+    }[] = [];
     for (const s of PORT.SHIPS) {
       const built = buildShip(s);
       group.add(built.group);
-      ships.push({ key: s.key, x: s.pos[0], z: s.pos[2], group: built.group, hull: built.hull, pulse: 0 });
+      const padMesh = meshBox(PORT.PAD_W, PORT.PAD_H, PORT.PAD_D, "#ffffff");
+      (padMesh.material as any).transparent = true;
+      (padMesh.material as any).opacity = 0;       // invisible to the eye, but still raycasts (the tap target)
+      (padMesh.material as any).depthWrite = false;
+      padMesh.castShadow = false; padMesh.receiveShadow = false;
+      padMesh.position.set(s.pos[0], PORT.PAD_Y, s.pos[2]);
+      padMesh.visible = false;                      // shown only inside the port (start/stop)
+      const pad = world.createTransformEntity(padMesh).addComponent(Interactable);
+      ships.push({ key: s.key, x: s.pos[0], z: s.pos[2], group: built.group, hull: built.hull,
+                   pulse: 0, pad, padMesh, padWasPressed: false });
     }
+
+    // The empty-water deselect catcher (see CONSTANTS): a big invisible plane BEHIND every
+    // ship. The ray picks the nearest target, so a container or ship is always hit first;
+    // only a tap that misses everything reaches this plane and clears the selection. It is
+    // shown in the port and parked otherwise, the same as the ship pads.
+    const catchMesh = new Mesh(
+      new PlaneGeometry(PORT.CATCH_W, PORT.CATCH_H),
+      new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: DoubleSide }),
+    );
+    catchMesh.position.set(0, PORT.CATCH_Y, PORT.CATCH_Z);
+    catchMesh.visible = false;
+    const catchEntity = world.createTransformEntity(catchMesh).addComponent(Interactable);
+    let catchWasPressed = false;
 
     // ---- the TEMPORARY debug count readout (a canvas panel; real scoring replaces it) ----
     const counts: Record<string, number> = { europe: 0, asia: 0, usa: 0 };
@@ -4159,36 +4213,116 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
 
     // ---- the recycling container supply ----
-    // Each container is a cube ENTITY made grabbable once (DistanceGrabbable). We
-    // never tear the grab down (the internal Handle is not exported, and re-adding
-    // would not rebuild it), so we control grabbability by PLACEMENT instead: an idle
-    // container sits on its dock slot in easy aim; a loaded one parks far below the
-    // world (invisible AND unreachable by any forward aim) until its slot refills.
+    // Each container is a cube ENTITY the student TAPS to select (Interactable, the same
+    // ray the map landmarks and the choice cards use). Its STATE drives everything: an idle
+    // cube rests on its dock slot; a selected one lifts and glows; a flying one arcs to a
+    // ship; a loaded one parks far below the world (invisible AND, thanks to the hidden-
+    // target hit guard, untappable) until its slot refills. Rotation/scale stay locked so
+    // the cube reads upright and its color stays clear.
     type Cont = {
-      entity: any; mesh: any; key: string; slot: number; state: string; wasGrabbed: boolean;
-      fx: number; fy: number; fz: number; t: number; dur: number; tint: number; timer: number;
-    };
-    // The student points the ray at a container and pulls the trigger to grab it; the
-    // cube floats out along the aim about as far as the ships (GRAB_REACH), so aiming
-    // at a ship carries it there. Rotation/scale are locked so the cube stays upright
-    // and its color stays readable; it stays where released (we handle load / return).
-    const GRAB_OPTS = {
-      movementMode: MovementMode.MoveTowardsTarget,
-      rotate: false, translate: true, scale: false,
-      returnToOrigin: false, detachOnGrab: false,
-      moveSpeedFactor: PORT.GRAB_SPEED,
-      targetPositionOffset: [0, 0, -PORT.GRAB_REACH] as [number, number, number],
+      entity: any; mesh: any; key: string; slot: number; state: string; wasPressed: boolean;
+      fx: number; fy: number; fz: number;         // flight / return START point (world)
+      tx: number; ty: number; tz: number;         // flight TARGET point: the ship deck (world)
+      targetShip: any;                            // the ship a flying container is bound for
+      t: number; dur: number; tint: number; timer: number;
     };
     const conts: Cont[] = [];
     for (let i = 0; i < PORT.SLOTS.length; i++) {
       const mesh = meshBox(PORT.CONTAINER, PORT.CONTAINER, PORT.CONTAINER, "#ffffff");
-      (mesh.material as any).emissive = new Color("#d23b30"); // red "wrong ship" blink, intensity in tick
+      (mesh.material as any).emissive = new Color(PORT.WRONG_GLOW); // red "wrong ship" blink; gold while selected
       (mesh.material as any).emissiveIntensity = 0;
       mesh.visible = false;
       mesh.position.set(0, PORT.PARK_Y, 0);
-      const entity = world.createTransformEntity(mesh).addComponent(DistanceGrabbable, GRAB_OPTS);
-      conts.push({ entity, mesh, key: "europe", slot: i, state: "parked", wasGrabbed: false,
-                   fx: 0, fy: 0, fz: 0, t: 0, dur: 0, tint: 0, timer: 0 });
+      const entity = world.createTransformEntity(mesh).addComponent(Interactable);
+      conts.push({ entity, mesh, key: "europe", slot: i, state: "parked", wasPressed: false,
+                   fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0, targetShip: null,
+                   t: 0, dur: 0, tint: 0, timer: 0 });
+    }
+    let selectedCont: Cont | null = null;  // the one tapped container (lifts + glows), or none
+    let flyingCont: Cont | null = null;    // the one container mid-arc, or none (only one at a time)
+
+    // ======================================================================
+    // ON-ARRIVAL DIRECTIONS (guidance only; the load mechanic / count / timers are NOT
+    // touched). An intro panel + Start button explain the goal, then a short hint follows
+    // the play. Everything draws on top and sits above the dock so it never covers the
+    // ships / containers / count, and text redraws only on a change (nothing flashes).
+    // ======================================================================
+    let portStarted = false;                 // false while the intro is up; true once Start is tapped
+    function onTop(mesh: any) {               // always readable, never depth-clipped by sky/ships
+      (mesh.material as any).depthTest = false;
+      (mesh.material as any).depthWrite = false;
+      mesh.renderOrder = 50000;
+    }
+
+    // (1) The intro: the goal + the controls, in a friendly fifth-grade voice.
+    const introPanel = makeTextPanel(
+      "Ships Are Leaving!",
+      "Send each container to the ship with the same color. Tap a container, then tap its matching ship.",
+      PORT.INTRO_W,
+    );
+    onTop(introPanel);
+    introPanel.position.set(PORT.INTRO_POS[0], PORT.INTRO_POS[1], PORT.INTRO_POS[2]);
+    introPanel.visible = false;
+    group.add(introPanel);
+
+    // The Start button that dismisses the intro (its own Interactable entity, like the ship
+    // pads; rides the intro card's lower margin, shown only while the intro is up).
+    const startBtnMesh = makeButtonCard("Start", PORT.START_W, PORT.START_H);
+    onTop(startBtnMesh);
+    startBtnMesh.renderOrder = 50001;
+    startBtnMesh.position.set(PORT.START_POS[0], PORT.START_POS[1], PORT.START_POS[2]);
+    startBtnMesh.visible = false;
+    const startBtn = world.createTransformEntity(startBtnMesh).addComponent(Interactable);
+    let startWasPressed = false;
+
+    // (2) The following hint: one short line on a navy pill near the dock, reworded as the
+    // state changes (nothing selected -> pick one; one selected -> send it to its match).
+    const hintCanvas = document.createElement("canvas");
+    hintCanvas.width = 1024; hintCanvas.height = 192;
+    const hctx = hintCanvas.getContext("2d") as CanvasRenderingContext2D;
+    const hintTex = new CanvasTexture(hintCanvas);
+    hintTex.colorSpace = SRGBColorSpace;
+    const hintMesh = new Mesh(
+      new PlaneGeometry(PORT.HINT_W, PORT.HINT_H),
+      new MeshBasicMaterial({ map: hintTex, transparent: true, side: DoubleSide }),
+    );
+    onTop(hintMesh);
+    hintMesh.position.set(PORT.HINT_POS[0], PORT.HINT_POS[1], PORT.HINT_POS[2]);
+    hintMesh.visible = false;
+    group.add(hintMesh);
+    let hintState = "";
+    function drawHint(text: string) {
+      const W = 1024, Hh = 192;
+      hctx.clearRect(0, 0, W, Hh);
+      hctx.fillStyle = "rgba(31,58,95,0.92)";   // a soft navy pill, so white words read over the water
+      if ((hctx as any).roundRect) { hctx.beginPath(); (hctx as any).roundRect(16, 16, W - 32, Hh - 32, 40); hctx.fill(); }
+      else hctx.fillRect(16, 16, W - 32, Hh - 32);
+      hctx.fillStyle = "#ffffff";
+      hctx.textAlign = "center";
+      hctx.textBaseline = "middle";
+      let size = 56;
+      do { hctx.font = "bold " + size + "px sans-serif"; size -= 2; }
+      while (hctx.measureText(text).width > W - 96 && size > 20);
+      hctx.fillText(text, W / 2, Hh / 2 + 2);
+      hintTex.needsUpdate = true;
+    }
+
+    function showIntro() {                    // arrival: read the directions, hint hidden until Start
+      portStarted = false;
+      introPanel.visible = true;
+      startBtnMesh.visible = true;
+      startBtnMesh.scale.setScalar(1);
+      startWasPressed = !!startBtn.hasComponent(Pressed); // never fire on a carried-over press
+      hintMesh.visible = false;
+      hintState = "";
+    }
+    function beginPlay() {                    // Start tapped: clear the intro, bring up the hint
+      portStarted = true;
+      introPanel.visible = false;
+      startBtnMesh.visible = false;
+      hintMesh.visible = true;
+      hintState = "pick"; drawHint("Tap a container to pick it up");
+      sfxClick();
     }
 
     let refillIdx = 0;
@@ -4201,104 +4335,198 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       ct.key = key;
       (ct.mesh.material as any).color = new Color(colorByKey[key]);
     }
-    function park(ct: Cont) {              // hide a container far below the world: gone AND ungrabbable
+    function park(ct: Cont) {              // hide a container far below the world: gone AND untappable
       ct.state = "parked"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
+      ct.mesh.scale.setScalar(1);
       (ct.mesh.material as any).emissiveIntensity = 0;
       ct.mesh.visible = false;
       ct.mesh.position.set(0, PORT.PARK_Y, 0);
-      ct.wasGrabbed = false;
+      ct.wasPressed = false;
+      if (selectedCont === ct) selectedCont = null;
     }
-    function toSlot(ct: Cont) {            // set a container idle + grabbable on its dock slot
+    function toSlot(ct: Cont) {            // set a container idle + tappable on its dock slot
       const sp = PORT.SLOTS[ct.slot];
       ct.state = "idle"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
+      ct.mesh.scale.setScalar(1);
       (ct.mesh.material as any).emissiveIntensity = 0;
       ct.mesh.position.set(sp[0], sp[1], sp[2]);
       ct.mesh.visible = true;
-      ct.wasGrabbed = !!ct.entity.hasComponent(Grabbed); // never fire on a carried-over grab
+      ct.wasPressed = !!ct.entity.hasComponent(Pressed); // never fire on a carried-over press
     }
-    function startReturn(ct: Cont) {       // ease a wrong / open-water drop back to its slot
+    function startReturn(ct: Cont) {       // ease a wrong ship's container back to its slot
       const wp = new Vector3(); ct.mesh.getWorldPosition(wp);
       ct.fx = wp.x; ct.fy = wp.y; ct.fz = wp.z;
       ct.t = 0; ct.dur = PORT.RETURN_MS; ct.state = "returning";
     }
 
-    // A release: read the container's world position and find the ship whose drop
-    // zone holds it (nearest in x among the boxes). Match => load; wrong => gently
-    // refuse; none => float home. This owns the cue and the count.
-    function onRelease(ct: Cont) {
+    // ---- TAP TO SELECT ----  Lift the chosen container and give it the warm gold glow so
+    // it clearly stands out. Only one container is ever selected; choosing a new one drops
+    // the old one back to its slot first.
+    function selectCont(ct: Cont) {
+      if (selectedCont && selectedCont !== ct) deselectCont(selectedCont);
+      selectedCont = ct;
+      ct.state = "selected";
+      (ct.mesh.material as any).emissive.set(PORT.SELECT_GLOW); // warm gold while chosen (lift + glow in tick)
+      sfxClick();                          // a soft tap to confirm the pick
+    }
+    function deselectCont(ct: Cont) {      // let it go: drop it back onto its slot, glow off
+      if (selectedCont === ct) selectedCont = null;
+      (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW);  // restore the red the wrong-ship blink uses
+      toSlot(ct);
+      sfxClick();
+    }
+
+    // ---- TAP A SHIP ----  Send the selected container on a smooth arc to that ship's deck.
+    // Only one is ever in flight; the actual match is decided on arrival (onArrive).
+    function sendToShip(sh: any) {
+      const ct = selectedCont;
+      if (!ct || flyingCont) return;       // need a selection, and only one container in flight
+      selectedCont = null;
       const wp = new Vector3(); ct.mesh.getWorldPosition(wp);
-      // Pick the ship the student aimed at: nearest in X (which ship), within a
-      // generous X width and a loose height window. We deliberately do NOT gate on Z
-      // (how far the throw travelled): the destination is decided by which ship you
-      // point at, so a relaxed Z keeps the match forgiving for a kid's loose aim.
-      let best: any = null;
-      let bestdx = Infinity;
-      for (const sh of ships) {
-        const dx = Math.abs(wp.x - sh.x);
-        const dy = Math.abs(wp.y - PORT.ZONE_CENTER_Y);
-        if (dx <= PORT.ZONE_W / 2 && dy <= PORT.ZONE_H / 2 && dx < bestdx) {
-          best = sh; bestdx = dx;
-        }
-      }
-      if (best && best.key === ct.key) {
+      ct.fx = wp.x; ct.fy = wp.y; ct.fz = wp.z;                 // arc START (its lifted spot)
+      ct.tx = sh.x; ct.ty = PORT.DECK_Y + PORT.CONTAINER / 2; ct.tz = sh.z; // arc END (the deck)
+      ct.targetShip = sh;
+      ct.t = 0; ct.dur = PORT.FLIGHT_MS; ct.state = "flying";
+      (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW);  // selection glow off; red ready if it is wrong
+      (ct.mesh.material as any).emissiveIntensity = 0;
+      ct.mesh.scale.setScalar(1);
+      flyingCont = ct;
+    }
+
+    // ---- ARRIVAL ----  The flying container reached its ship: this is the KEPT match-and-
+    // count logic. Match => it loads (chime, the ship glows gold, its count goes up, and a
+    // fresh container refills the slot shortly). Wrong => a soft click + a red blink and it
+    // flies back to its slot, no penalty. Either way the game is ready for the next tap.
+    function onArrive(ct: Cont) {
+      const sh = ct.targetShip;
+      flyingCont = null;
+      ct.targetShip = null;
+      if (sh && sh.key === ct.key) {
         sfxChime();                        // a clear, happy "loaded!"
-        counts[best.key] = (counts[best.key] || 0) + 1;
-        best.pulse = 1;                    // the ship glows gold, eased down in tick
+        counts[ct.key] = (counts[ct.key] || 0) + 1;
+        sh.pulse = 1;                      // the ship glows gold, eased down in tick
         drawCounts();
         park(ct);                          // it snaps aboard and is gone from the dock...
         ct.state = "loaded"; ct.timer = PORT.REFILL_MS; // ...and a fresh one refills the slot shortly
         console.log("[PORT] loaded " + ct.key + " => totals", { ...counts });
-      } else if (best) {
+      } else {
         sfxClick();                        // a soft, gentle "not that ship"
         ct.tint = 1;                       // a brief red blink, eased down in tick
-        startReturn(ct);
-        console.log("[PORT] wrong ship: " + ct.key + " over " + best.key);
-      } else {
-        startReturn(ct);                   // open water: no penalty, just float home
+        startReturn(ct);                   // and it flies back to its slot, no penalty
+        console.log("[PORT] wrong ship: " + ct.key + " over " + (sh ? sh.key : "?"));
       }
     }
 
     function tick() {
-      // gentle ship bob + the gold "loaded!" pulse easing away.
+      // gentle ship bob, the gold "loaded!" pulse easing away, and a faint hover glow so a
+      // ship the ray rests on (while something is selected) reads as a tap target. The
+      // active load pulse owns the glow; the hover glow only shows when the pulse is idle.
       for (const sh of ships) {
         sh.group.position.y = Math.sin(portClock * 0.001 * Math.PI * 2 * PORT.BOB_HZ + sh.x) * PORT.BOB_AMP;
         if (sh.pulse > 0) {
           sh.pulse = Math.max(0, sh.pulse - PORT.PULSE_FALL);
           (sh.hull.material as any).emissiveIntensity = sh.pulse * 0.7;
+        } else {
+          const hov = !!selectedCont && !flyingCont && !!sh.pad.hasComponent(Hovered);
+          (sh.hull.material as any).emissiveIntensity = hov ? PORT.SHIP_HOVER_GLOW : 0;
         }
       }
       for (const ct of conts) {
-        if (ct.state === "returning") {
-          // a re-grab mid-flight wins: hand control back to the grab system.
-          if (ct.entity.hasComponent(Grabbed)) {
-            ct.dur = 0; ct.state = "idle"; ct.wasGrabbed = true;
-          } else {
-            ct.t = Math.min(ct.dur, ct.t + PORT.TICK_MS);
-            const k = ct.dur > 0 ? ct.t / ct.dur : 1;
-            const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOut
-            const sp = PORT.SLOTS[ct.slot];
-            ct.mesh.position.set(
-              ct.fx + (sp[0] - ct.fx) * e,
-              ct.fy + (sp[1] - ct.fy) * e,
-              ct.fz + (sp[2] - ct.fz) * e,
-            );
-            if (ct.t >= ct.dur) toSlot(ct);
-          }
+        if (ct.state === "flying") {
+          // a smooth up-and-over arc to the ship deck. setInterval-driven (rAF pauses in
+          // the headset); locked upright, so only the position moves.
+          ct.t = Math.min(ct.dur, ct.t + PORT.TICK_MS);
+          const k = ct.dur > 0 ? ct.t / ct.dur : 1;
+          const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOut along the path
+          const arc = Math.sin(Math.PI * k) * PORT.FLIGHT_ARC;            // 0 at both ends, peak mid-flight
+          ct.mesh.position.set(
+            ct.fx + (ct.tx - ct.fx) * e,
+            ct.fy + (ct.ty - ct.fy) * e + arc,
+            ct.fz + (ct.tz - ct.fz) * e,
+          );
+          if (ct.t >= ct.dur) onArrive(ct);
+          continue; // a flying container does nothing else this tick
         }
-        if (ct.tint > 0) {
-          ct.tint = Math.max(0, ct.tint - PORT.TINT_FALL);
-          (ct.mesh.material as any).emissiveIntensity = ct.tint * 0.85;
+        if (ct.state === "returning") {
+          ct.t = Math.min(ct.dur, ct.t + PORT.TICK_MS);
+          const k = ct.dur > 0 ? ct.t / ct.dur : 1;
+          const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOut
+          const sp = PORT.SLOTS[ct.slot];
+          ct.mesh.position.set(
+            ct.fx + (sp[0] - ct.fx) * e,
+            ct.fy + (sp[1] - ct.fy) * e,
+            ct.fz + (sp[2] - ct.fz) * e,
+          );
+          if (ct.tint > 0) { // the red "wrong ship" blink fades as it flies home
+            ct.tint = Math.max(0, ct.tint - PORT.TINT_FALL);
+            (ct.mesh.material as any).emissiveIntensity = ct.tint * 0.85;
+          }
+          if (ct.t >= ct.dur) toSlot(ct);
+          continue;
+        }
+        if (ct.state === "selected") {
+          // lift it above its slot with a tiny, calm hover, and breathe the gold glow so it
+          // is unmistakably the chosen one. Nothing flashes (a slow, gentle sine).
+          const sp = PORT.SLOTS[ct.slot];
+          const phase = portClock * 0.001 * Math.PI * 2 * PORT.SELECT_HOVER_HZ;
+          ct.mesh.position.set(sp[0], sp[1] + PORT.SELECT_LIFT + Math.sin(phase) * PORT.SELECT_HOVER_AMP, sp[2]);
+          const g = 0.5 + 0.5 * Math.sin(phase);
+          (ct.mesh.material as any).emissiveIntensity =
+            PORT.SELECT_GLOW_MIN + (PORT.SELECT_GLOW_MAX - PORT.SELECT_GLOW_MIN) * g;
+          ct.mesh.scale.setScalar(1);
+          continue;
         }
         if (ct.state === "loaded" && ct.timer > 0) {
           ct.timer -= PORT.TICK_MS;
           if (ct.timer <= 0) { recolor(ct, nextRefillColor()); toSlot(ct); }
+          continue;
         }
-        // a container is grabbable while idle or returning; watch for the release.
-        if (ct.state === "idle" || ct.state === "returning") {
-          const grabbed = !!ct.entity.hasComponent(Grabbed);
-          if (ct.wasGrabbed && !grabbed) onRelease(ct);
-          ct.wasGrabbed = grabbed;
+        if (ct.state === "idle") {
+          // grow a touch while the ray rests on it, so it reads as tappable (only once play
+          // has started, so nothing looks interactive while the intro is still up).
+          const hov = portStarted && !flyingCont && !!ct.entity.hasComponent(Hovered);
+          ct.mesh.scale.setScalar(hov ? PORT.HOVER_SCALE : 1);
         }
+      }
+
+      // ---- TAP EDGE-DETECTION ----  fire once on a FRESH Pressed edge, the same way the
+      // landmarks and choice cards read a select (a held trigger never re-fires). Gated on
+      // portStarted, so taps do nothing until the student dismisses the intro with Start.
+      // Tapping an idle container selects it; tapping the selected one again deselects it; a
+      // ship sends the selection; empty water (the catcher) deselects. One at a time.
+      if (portStarted) {
+        for (const ct of conts) {
+          const tappable = ct.state === "idle" || ct.state === "selected";
+          const prs = tappable && !flyingCont && !!ct.entity.hasComponent(Pressed);
+          if (prs && !ct.wasPressed) {
+            if (ct.state === "selected") deselectCont(ct); // tap the chosen one again => let it go
+            else selectCont(ct);                           // tap an idle one => choose it
+          }
+          ct.wasPressed = prs;
+        }
+        for (const sh of ships) {
+          const prs = !!sh.pad.hasComponent(Pressed);
+          if (prs && !sh.padWasPressed && selectedCont && !flyingCont) sendToShip(sh);
+          sh.padWasPressed = prs;
+        }
+        const cprs = !!catchEntity.hasComponent(Pressed);
+        if (cprs && !catchWasPressed && selectedCont && !flyingCont) deselectCont(selectedCont);
+        catchWasPressed = cprs;
+
+        // Keep the following hint in step with the state: pick a container, then send it to
+        // its match. Reword only when it actually changes, so nothing flashes.
+        const want = selectedCont ? "ship" : "pick";
+        if (want !== hintState) {
+          hintState = want;
+          drawHint(want === "ship" ? "Now tap the ship with the same color" : "Tap a container to pick it up");
+        }
+      } else {
+        // Intro is up: a fresh press of the Start button begins play and clears the intro.
+        const hov = !!startBtn.hasComponent(Hovered);
+        const prs = !!startBtn.hasComponent(Pressed);
+        startBtnMesh.scale.setScalar(prs ? VISIT.BTN_PRESS_SCALE : (hov ? VISIT.BTN_HOVER_SCALE : 1));
+        if (prs && !startWasPressed) beginPlay();
+        startWasPressed = prs;
       }
     }
 
@@ -4306,16 +4534,29 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       portClock = 0; refillIdx = 0;
       counts.europe = 0; counts.asia = 0; counts.usa = 0;
       drawCounts();
-      for (const sh of ships) { sh.pulse = 0; sh.group.position.y = 0; (sh.hull.material as any).emissiveIntensity = 0; }
+      selectedCont = null; flyingCont = null; catchWasPressed = false;
+      catchMesh.visible = true;                  // the empty-water deselect catcher is live in the port
+      for (const sh of ships) {
+        sh.pulse = 0; sh.group.position.y = 0; (sh.hull.material as any).emissiveIntensity = 0;
+        sh.padWasPressed = false;
+        sh.padMesh.visible = true;               // ship tap-pads are tappable only inside the port
+      }
       for (let i = 0; i < conts.length; i++) {
         const ct = conts[i];
         ct.slot = i;
+        (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW); // clear any leftover gold selection glow
         recolor(ct, PORT.START_COLORS[i % PORT.START_COLORS.length]);
         toSlot(ct);
       }
+      showIntro();                               // greet the student with the directions; Start begins play
     }
     function stop() {
       for (const ct of conts) park(ct); // hidden + unreachable, so nothing leaks back to the hub
+      selectedCont = null; flyingCont = null;
+      catchMesh.visible = false;                 // park the catcher so it never blocks the hub
+      for (const sh of ships) { sh.padWasPressed = false; sh.padMesh.visible = false; }
+      portStarted = false; startWasPressed = false; // tidy the directions so nothing leaks to the hub
+      introPanel.visible = false; startBtnMesh.visible = false; hintMesh.visible = false;
     }
 
     // The game's own loop: bob, eases, refill timers, and release detection. Gated so
