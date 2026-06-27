@@ -655,6 +655,202 @@ export function makeReadoutCard(
   );
 }
 
+// ----------------------------------------------------------------------------
+// EXPLORER REPORT CARD  —  the Module 6 tour finish, drawn on ONE canvas (so the
+// gold stamps and stars render in the headset, where a UIKit font atlas would
+// miss those glyphs). The caller computes the data and steps the reveal on a
+// setInterval, then calls draw() with the current state; this only paints what
+// it is handed. Layout is fixed; everything reveals by what the state shows.
+// ----------------------------------------------------------------------------
+export type ExplorerReportState = {
+  greeting: string;
+  stops: { name: string }[];            // the four places, all stamped
+  meters: {
+    label: string; color: string; value: number;
+    fill01: number;   // 0..1 eased reveal; the bar reaches (value/100) of the track times this
+    stars: number;    // 1..3
+    line: string;     // one short encouraging line
+    shown: boolean;   // the stars + line appear once the bar has filled
+  }[];
+  title: string; titleNote: string; titleShown: boolean;
+  savedNote: string;  // a small confirmation once Save is pressed (else "")
+};
+
+export function makeExplorerReportCard(widthMeters = 2.0): {
+  mesh: Mesh;
+  draw: (state: ExplorerReportState) => void;
+} {
+  const W = 1200, H = 1000;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  const tex = new CanvasTexture(canvas);
+  tex.colorSpace = SRGBColorSpace;
+  const mesh = new Mesh(
+    new PlaneGeometry(widthMeters, (widthMeters * H) / W),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+
+  const NAVY = "#1F3A5F", GOLD = "#f4c20d", GOLD_DK = "#9c6f12", MUTE = "#8a6118";
+
+  // A gold "visited" stamp: a filled disk with a white check, the 2D twin of the
+  // pedestal badge, so the four stops read as stamped complete.
+  function stamp(cx: number, cy: number, r: number) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = GOLD;
+    ctx.fill();
+    ctx.lineWidth = Math.max(2, r * 0.14);
+    ctx.strokeStyle = GOLD_DK;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.lineWidth = Math.max(3, r * 0.22);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.moveTo(cx - r * 0.42, cy + r * 0.02);
+    ctx.lineTo(cx - r * 0.08, cy + r * 0.36);
+    ctx.lineTo(cx + r * 0.46, cy - r * 0.34);
+    ctx.stroke();
+  }
+
+  // A five-point star: filled gold when earned, a soft outline when not.
+  function star(cx: number, cy: number, R: number, filled: boolean) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const ang = -Math.PI / 2 + (i * Math.PI) / 5;
+      const rad = i % 2 === 0 ? R : R * 0.46;
+      const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = filled ? GOLD : "#e8e1cd";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = filled ? GOLD_DK : "#cdc3aa";
+    ctx.stroke();
+  }
+
+  function draw(state: ExplorerReportState) {
+    ctx.clearRect(0, 0, W, H);
+
+    // Parchment card with a warm gold border (the shared panel look).
+    ctx.fillStyle = "#fbf3dd";
+    tracePanel(ctx, 8, 8, W - 16, H - 16, 44);
+    ctx.fill();
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = "#caa24a";
+    tracePanel(ctx, 8, 8, W - 16, H - 16, 44);
+    ctx.stroke();
+
+    // --- Header: eyebrow + greeting ---
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = MUTE;
+    ctx.font = "bold 30px sans-serif";
+    ctx.fillText("E X P L O R E R   R E P O R T", W / 2, 54);
+    ctx.fillStyle = NAVY;
+    ctx.font = "bold 50px sans-serif";
+    ctx.fillText(state.greeting, W / 2, 108);
+
+    // --- The four stamped stops ---
+    ctx.fillStyle = MUTE;
+    ctx.font = "bold 28px sans-serif";
+    ctx.fillText("The four places you explored", W / 2, 164);
+    for (let i = 0; i < state.stops.length; i++) {
+      const cx = (W * (i + 0.5)) / state.stops.length;
+      stamp(cx, 214, 30);
+      ctx.fillStyle = NAVY;
+      ctx.font = "bold 26px sans-serif";
+      wrapText(ctx, state.stops[i].name, cx, 272, 250, 32);
+    }
+    ctx.strokeStyle = "#e2d8bf";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(80, 350);
+    ctx.lineTo(W - 80, 350);
+    ctx.stroke();
+
+    // --- The three meters, revealed one at a time ---
+    const top0 = 374, rowH = 150, barX = 100, barW = 700, barH = 28;
+    for (let r = 0; r < state.meters.length; r++) {
+      const m = state.meters[r];
+      const y0 = top0 + r * rowH;
+      // color dot + label (top line)
+      ctx.beginPath();
+      ctx.arc(70, y0 + 18, 15, 0, Math.PI * 2);
+      ctx.fillStyle = m.color;
+      ctx.fill();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = NAVY;
+      ctx.font = "bold 36px sans-serif";
+      ctx.fillText(m.label, 100, y0 + 18);
+      // three stars (right of the top line); filled by rating once shown
+      for (let s = 0; s < 3; s++) star(980 + s * 62, y0 + 18, 22, m.shown && s < m.stars);
+      // the bar (lower line): bg track then the colored fill
+      ctx.fillStyle = "#e2dccb";
+      tracePanel(ctx, barX, y0 + 52, barW, barH, 14);
+      ctx.fill();
+      const frac = Math.max(0, Math.min(1, m.value / 100)) * Math.max(0, Math.min(1, m.fill01));
+      const fw = barW * frac;
+      if (fw > 2) {
+        ctx.fillStyle = m.color;
+        tracePanel(ctx, barX, y0 + 52, fw, barH, 14);
+        ctx.fill();
+      }
+      // the value, just past the bar
+      ctx.textAlign = "left";
+      ctx.fillStyle = NAVY;
+      ctx.font = "bold 34px sans-serif";
+      ctx.fillText(String(m.value), barX + barW + 22, y0 + 66);
+      // the encouraging line, once this meter has filled
+      if (m.shown) {
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = NAVY;
+        ctx.font = "30px sans-serif";
+        ctx.fillText(m.line, 100, y0 + 116);
+      }
+    }
+
+    // --- The Virginia title (the climax), revealed last ---
+    if (state.titleShown) {
+      const ty = 846;
+      ctx.fillStyle = GOLD;
+      tracePanel(ctx, W / 2 - 330, ty - 44, 660, 88, 44);
+      ctx.fill();
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = GOLD_DK;
+      tracePanel(ctx, W / 2 - 330, ty - 44, 660, 88, 44);
+      ctx.stroke();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = NAVY;
+      ctx.font = "bold 46px sans-serif";
+      ctx.fillText(state.title, W / 2, ty);
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = NAVY;
+      ctx.font = "30px sans-serif";
+      ctx.fillText(state.titleNote, W / 2, ty + 78);
+    }
+
+    // --- A small confirmation once the report is saved for the teacher ---
+    if (state.savedNote) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = "#2e7d32";
+      ctx.font = "bold 26px sans-serif";
+      ctx.fillText(state.savedNote, W / 2, 974);
+    }
+
+    tex.needsUpdate = true;
+  }
+
+  return { mesh, draw };
+}
+
 // A SPEECH BUBBLE card: the same parchment look as makeTextPanel, but smaller
 // and with a little tail at the bottom so it reads as words spoken by whoever
 // stands below it (here, Foreman Fox). Title + wrapped body, then a downward

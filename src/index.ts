@@ -36,7 +36,7 @@ import {
 } from "@iwsdk/core";
 
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
-import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
+import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard, makeExplorerReportCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
 import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, sfxShipHorn, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience, startPortAmbience, stopPortAmbience } from "./sfx";
 
@@ -5245,46 +5245,72 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }, HUB_METERS.TICK_MS);
 
   // ======================================================================
-  // EXPLORER REPORT  —  the finish. Once the student has actually FINISHED all
-  // four stops (every STOPS.done true, so all four gold checks are lit), Foreman
-  // Fox offers a "See your Explorer Report" button at the hub. Pressing it opens
-  // the project's existing report card (ui/report.json) filled with the REAL
-  // running totals (m6Totals, the SAME numbers the hub meters show), and a
-  // "Return to the map" button takes the student back, so the report is never a
-  // dead end and they can revisit a stop. The report is NEVER forced: the offer
-  // appears only when all four are done, and only a press opens it. We reskin and
-  // theme the report's words/colors in the NEXT prompt; this prompt only wires
-  // finishing all four to open it.
+  // EXPLORER REPORT  —  the finish of the Virginia tour. Once the student has
+  // actually FINISHED all four stops (every STOPS.done true, so all four gold
+  // checks are lit), Foreman Fox offers a "See your Explorer Report" button at
+  // the hub. Pressing it opens a parchment report card that, in order: stamps the
+  // four places explored, fills the three meters one at a time (each with 1 to 3
+  // stars and one short, encouraging line), then names a Virginia title. A
+  // "Save My Report" button opens a printable page a teacher can collect, and
+  // "Return to the map" takes the student back, so the report is never a dead end.
+  // The report is NEVER forced: the offer appears only when all four are done.
   //
-  // Nothing here touches the four stops, the visit loop, the hub meters, or the
-  // gold checks. Every loop is setInterval (rAF pauses in the headset). The
+  // The card is CANVAS-drawn (makeExplorerReportCard) so the gold stamps and
+  // stars render in the headset. Nothing here changes the trigger, the meter
+  // math, the four stops, the visit loop, the hub meters, or the gold checks.
+  // Every loop is setInterval (rAF pauses in the headset). The
   // [[iwsdk-hidden-objects-stay-interactive]] rule applies: a hidden Interactable
   // is still clickable, so each button's PRESS is gated on the same conditions
-  // that show it, not on .visible alone.
+  // that show it, not on .visible alone. All words use the fifth-grade,
+  // second-person, no-em-dash voice; every tier is positive (no fail state).
   // ======================================================================
   const REPORT = {
     // The "See your Explorer Report" offer: a clear banner floating ABOVE the
-    // landmark row (just over the title cards, under the YOUR PROGRESS meters), so
-    // the whole label is on screen, it covers none of the gold checks, and it
-    // blocks no landmark (the row stays pointable for a revisit). Nudged toward
-    // Fox's side and angled to the student. Tunable; collides with nothing.
+    // landmark row, fully on screen, covering no gold check and blocking no
+    // landmark (the row stays pointable for a revisit). Angled to the student.
     SEE_POS: [-0.3, 2.22, 4.6] as [number, number, number],
-    SEE_YAW: 0.15,         // radians; a slight turn toward the centered student
-    SEE_W: 1.7,            // button width (metres)
-    SEE_H: 0.42,           // button height (metres)
-    // The report card: centered in front of the student at comfortable kid reading
-    // height, just ahead of the landmark row so it reads as the finale.
-    PANEL_POS: [0, 1.8, 5.0] as [number, number, number],
-    PANEL_W: 1.9,          // report panel bounding width (metres)
-    PANEL_H: 1.4,          // report panel bounding height (metres)
-    // The "Return to the map" button, centered just below the report card.
-    RETURN_POS: [0, 0.88, 5.12] as [number, number, number],
-    RETURN_W: 1.6,         // button width (metres)
-    RETURN_H: 0.4,         // button height (metres)
-    TRACK: 40,             // must match the .bar-bg width in ui/report.uikitml
-    HOVER_SCALE: 1.06,     // gentle grow while pointed at (matches VISIT.BTN_*)
-    PRESS_SCALE: 0.95,     // quick squish on press
+    SEE_YAW: 0.15, SEE_W: 1.7, SEE_H: 0.42,
+    // The report card: centered in front of the student, just ahead of the row.
+    PANEL_POS: [0, 1.78, 4.95] as [number, number, number],
+    PANEL_W: 2.0,          // report card width (metres); height follows the canvas
+    // The two buttons under the card: Save (left), Return (right).
+    SAVE_POS: [-0.58, 0.74, 5.12] as [number, number, number],
+    SAVE_W: 1.04, SAVE_H: 0.4,
+    RETURN_POS: [0.58, 0.74, 5.12] as [number, number, number],
+    RETURN_W: 1.04, RETURN_H: 0.4,
+    HOVER_SCALE: 1.06, PRESS_SCALE: 0.95,  // button feedback (matches VISIT.BTN_*)
     TICK_MS: 33,           // loop rate (rAF pauses in the headset)
+
+    // The three meters, in reveal order. key reads m6Totals; color matches the hub
+    // meters (coral / green / blue). Each has two POSITIVE line tiers: a strong
+    // line at or above LINE_HI_AT, a warm line below. Fifth-grade, second person.
+    METERS: [
+      { key: "economic", label: "Economic Impact", color: "#d76f4f",
+        hi: "You helped Virginia's economy grow.", warm: "You gave Virginia's economy a boost." },
+      { key: "innovation", label: "Innovation Thinking", color: "#5fae4a",
+        hi: "You used new ideas to solve real problems.", warm: "You found smart new ways to help." },
+      { key: "problem", label: "Problem Solving", color: "#4a8fd6",
+        hi: "You made careful choices that paid off.", warm: "You thought through tricky choices." },
+    ],
+    LINE_HI_AT: 50,        // a meter at or above this earns its "hi" line (else "warm")
+    STAR3_AT: 60,          // 3 stars at or above this score
+    STAR2_AT: 30,          // 2 stars at or above this; below, 1 star (never 0, no fail)
+
+    // The combined Virginia title, chosen by the AVERAGE of the three meters
+    // (checked top down). All three are warm and encouraging.
+    TITLES: [
+      { at: 60, name: "Virginia Economist", note: "You see how Virginia's economy works." },
+      { at: 35, name: "Virginia Innovator", note: "You bring fresh ideas to Virginia." },
+      { at: 0, name: "Virginia Trailblazer", note: "You are blazing your own trail in Virginia." },
+    ],
+
+    // The staged reveal timings (milliseconds). Slow and smooth, never a flash.
+    STOPS_HOLD_MS: 750,    // hold on the four stamps before the first meter fills
+    METER_GAP_MS: 850,     // time between each meter starting to fill
+    FILL_EASE: 0.16,       // how fast each bar eases toward its score
+    TITLE_AT_MS: 3350,     // when the Virginia title appears (after the third meter)
+    RETURN_AT_MS: 750,     // Return is offered once the stamps are up (never stuck)
+    SAVE_AT_MS: 3850,      // Save is offered once the whole report has revealed
   };
 
   // A gold button that always reads over the world, wrapped in a ray-target entity
@@ -5303,54 +5329,142 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }
   const seeReportBtn = makeReportButton("See your Explorer Report", REPORT.SEE_POS, REPORT.SEE_YAW, REPORT.SEE_W, REPORT.SEE_H);
   const reportReturnBtn = makeReportButton("Return to the map", REPORT.RETURN_POS, 0, REPORT.RETURN_W, REPORT.RETURN_H);
+  const reportSaveBtn = makeReportButton("Save My Report", REPORT.SAVE_POS, 0, REPORT.SAVE_W, REPORT.SAVE_H);
 
-  // The report card itself: the project's EXISTING report markup (ui/report.json),
-  // reused unchanged so its element ids keep working. Built like the hub-meters panel.
-  const m6ReportPanel = world
-    .createTransformEntity()
-    .addComponent(PanelUI, { config: "./ui/report.json", maxWidth: REPORT.PANEL_W, maxHeight: REPORT.PANEL_H });
-  m6ReportPanel.object3D!.position.set(REPORT.PANEL_POS[0], REPORT.PANEL_POS[1], REPORT.PANEL_POS[2]);
-  m6ReportPanel.object3D!.visible = false;
-  let m6ReportDoc: any = null;
-  whenPanelReady(m6ReportPanel, function (doc) { m6ReportDoc = doc; });
+  // The report card itself: a canvas-drawn parchment certificate, so the gold
+  // stamps and stars render in the headset (a UIKit font atlas would miss those
+  // glyphs). One mesh added to the scene, redrawn as the reveal advances.
+  // depthTest off so it reads over the hub; renderOrder is BELOW the buttons
+  // (50000) so Save / Return draw on top of it.
+  const reportCard = makeExplorerReportCard(REPORT.PANEL_W);
+  (reportCard.mesh.material as any).depthTest = false;
+  (reportCard.mesh.material as any).depthWrite = false;
+  reportCard.mesh.renderOrder = 49000;
+  reportCard.mesh.position.set(REPORT.PANEL_POS[0], REPORT.PANEL_POS[1], REPORT.PANEL_POS[2]);
+  reportCard.mesh.visible = false;
+  scene.add(reportCard.mesh);
 
-  // Fill the report's three meters from the live running totals. The report bars map
-  // to the SAME colors as the hub meters: growth = coral = Economic Impact, security
-  // = green = Innovation Thinking, smarts = blue = Problem Solving. The labels/title
-  // are still the project's originals (the next prompt reskins them); we only fill
-  // the numbers + bars and a friendly greeting so no raw "..." placeholder shows.
-  function fillReport() {
-    if (!m6ReportDoc) return;
-    const setMeter = function (fillId: string, valId: string, val: number) {
-      m6ReportDoc.getElementById(valId)?.setProperties({ text: String(Math.round(val)) });
-      m6ReportDoc.getElementById(fillId)?.setProperties({ width: (REPORT.TRACK * val) / 100 });
-    };
-    setMeter("fill-growth", "value-growth", m6Totals.economic);
-    setMeter("fill-security", "value-security", m6Totals.innovation);
-    setMeter("fill-smarts", "value-smarts", m6Totals.problem);
-    m6ReportDoc.getElementById("greeting")?.setProperties({ text: "Great work, Explorer!" });
-    m6ReportDoc.getElementById("personality-name")?.setProperties({ text: "" });
-    m6ReportDoc.getElementById("personality-blurb")?.setProperties({ text: "" });
+  // The live report state the card draws. Rebuilt on each open from m6Totals (we
+  // only READ the meter math here); the reveal loop eases the bars and flips the
+  // shown / title flags over time. The four stops are always all stamped (the
+  // report opens only when every one is done).
+  type RMeter = { label: string; color: string; value: number; fill01: number; stars: number; line: string; shown: boolean };
+  const reportState = {
+    greeting: "Great work, Explorer!",
+    stops: STOPS.map(function (s) { return { name: s.name }; }),
+    meters: [] as RMeter[],
+    title: "", titleNote: "", titleShown: false,
+    savedNote: "",
+  };
+  function starsFor(v: number) { return v >= REPORT.STAR3_AT ? 3 : v >= REPORT.STAR2_AT ? 2 : 1; }
+
+  // ---- SAVE MY REPORT (printable, laptop / teacher facing) ----  DOM renders
+  // only on the laptop, not in the headset, so this is the page a teacher prints
+  // or saves. Built once, re-filled on each Save; a print stylesheet hides
+  // everything else so only the report prints. It carries the four stamped stops,
+  // the three meter scores with their stars and lines, and the Virginia title.
+  let printOverlay: HTMLDivElement | null = null;
+  function ensurePrintOverlay(): HTMLDivElement {
+    if (printOverlay) return printOverlay;
+    const style = document.createElement("style");
+    style.textContent = [
+      "#m6-print{position:fixed;inset:0;background:rgba(20,28,40,0.55);display:none;z-index:2147483647;align-items:center;justify-content:center;font-family:Arial,Helvetica,sans-serif}",
+      "#m6-print .sheet{background:#fff;color:#1F3A5F;width:680px;max-width:92vw;max-height:92vh;overflow:auto;border-radius:14px;padding:26px 34px;box-shadow:0 12px 48px rgba(0,0,0,0.4)}",
+      "#m6-print .eyebrow{letter-spacing:3px;color:#8a6118;font-weight:bold;font-size:12px}",
+      "#m6-print h1{font-size:25px;margin:2px 0;color:#1F3A5F}",
+      "#m6-print .sub{color:#5b6b7e;font-size:13px;margin:2px 0 14px}",
+      "#m6-print h2{font-size:14px;color:#8a6118;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}",
+      "#m6-print .stops{display:flex;flex-wrap:wrap;gap:8px 22px}",
+      "#m6-print .stop{font-size:16px;font-weight:bold}",
+      "#m6-print .stamp{color:#c8962a}",
+      "#m6-print .meter{margin:10px 0}",
+      "#m6-print .meter .top{display:flex;justify-content:space-between;font-weight:bold;font-size:16px}",
+      "#m6-print .stars{color:#c8962a;letter-spacing:2px}",
+      "#m6-print .line{font-size:14px;margin-top:2px}",
+      "#m6-print .title{margin-top:16px;background:#f4c20d;border-radius:10px;padding:12px 16px;text-align:center}",
+      "#m6-print .title .name{font-size:22px;font-weight:bold}",
+      "#m6-print .title .note{font-size:14px}",
+      "#m6-print .foot{margin-top:16px;font-size:11px;color:#8a93a0;text-align:center}",
+      "#m6-print .actions{margin-top:18px;display:flex;gap:12px;justify-content:center}",
+      "#m6-print .actions button{font-size:15px;font-weight:bold;padding:9px 18px;border-radius:8px;border:0;cursor:pointer}",
+      "#m6-print .do-print{background:#c8962a;color:#1F3A5F}",
+      "#m6-print .do-close{background:#e2dccb;color:#1F3A5F}",
+      "@media print{body *{visibility:hidden!important}#m6-print,#m6-print *{visibility:visible!important}#m6-print{position:absolute;inset:0;background:#fff;display:flex!important}#m6-print .sheet{box-shadow:none;max-height:none;width:100%}#m6-print .actions{display:none!important}}",
+    ].join("");
+    document.head.appendChild(style);
+    const o = document.createElement("div");
+    o.id = "m6-print";
+    document.body.appendChild(o);
+    printOverlay = o;
+    return o;
+  }
+  function openPrintable() {
+    const o = ensurePrintOverlay();
+    const dateStr = new Date().toLocaleDateString();
+    const starStr = function (n: number) { return "★".repeat(n) + "☆".repeat(3 - n); };
+    const stopsHtml = reportState.stops.map(function (s) {
+      return '<div class="stop"><span class="stamp">✓</span> ' + s.name + "</div>";
+    }).join("");
+    const metersHtml = reportState.meters.map(function (m) {
+      return '<div class="meter"><div class="top"><span>' + m.label + "</span><span>" + m.value +
+        ' <span class="stars">' + starStr(m.stars) + "</span></span></div>" +
+        '<div class="line">' + m.line + "</div></div>";
+    }).join("");
+    o.innerHTML =
+      '<div class="sheet">' +
+      '<div class="eyebrow">VIRGINIA VENTURES &middot; EXPLORER REPORT</div>' +
+      "<h1>Virginia Today: Industry Explorer</h1>" +
+      '<div class="sub">' + reportState.greeting + " &nbsp;&middot;&nbsp; " + dateStr + "</div>" +
+      "<h2>The four places you explored</h2>" +
+      '<div class="stops">' + stopsHtml + "</div>" +
+      "<h2>Your scores</h2>" + metersHtml +
+      '<div class="title"><div class="name">' + reportState.title + '</div><div class="note">' + reportState.titleNote + "</div></div>" +
+      '<div class="foot">Print this page or save it as a PDF for your teacher.</div>' +
+      '<div class="actions"><button class="do-print">Print or Save as PDF</button><button class="do-close">Close</button></div>' +
+      "</div>";
+    (o.querySelector(".do-print") as HTMLButtonElement).onclick = function () { window.print(); };
+    (o.querySelector(".do-close") as HTMLButtonElement).onclick = function () { o.style.display = "none"; };
+    o.style.display = "flex";
   }
 
+  // ---- OPEN / CLOSE ----  Open rebuilds the state from the live totals and starts
+  // the reveal at zero; close hides the card. The meter math is only READ here.
   let reportOpen = false;
-  let seeReportWasPressed = false;
-  let returnToMapWasPressed = false;
+  let revealElapsed = 0;
   function openReport() {
-    fillReport();
+    const eco = Math.round(m6Totals.economic), inn = Math.round(m6Totals.innovation), pr = Math.round(m6Totals.problem);
+    reportState.meters = REPORT.METERS.map(function (m) {
+      const v = Math.round((m6Totals as Record<string, number>)[m.key]);
+      return {
+        label: m.label, color: m.color, value: v, fill01: 0, stars: starsFor(v),
+        line: v >= REPORT.LINE_HI_AT ? m.hi : m.warm, shown: false,
+      };
+    });
+    const avg = (eco + inn + pr) / 3;
+    const tier = REPORT.TITLES.find(function (t) { return avg >= t.at; }) || REPORT.TITLES[REPORT.TITLES.length - 1];
+    reportState.title = tier.name;
+    reportState.titleNote = tier.note;
+    reportState.titleShown = false;
+    reportState.savedNote = "";
+    revealElapsed = 0;
     reportOpen = true;
-    sfxChime();   // a warm, gentle reveal cue
-    console.log("[M6] explorer report opened => totals", m6Totals);
+    reportCard.draw(reportState);     // first frame: the four stamps + empty meters
+    sfxChime();                        // a warm, gentle reveal cue
+    console.log("[M6] explorer report opened => totals", m6Totals, "title", tier.name);
   }
   function closeReport() {
     reportOpen = false;
     sfxClick();
   }
 
-  // The one loop that runs the finish: offer the report once all four are done, open
-  // it on a fresh press, and bring the student back on Return. Visibility AND
-  // press-handling share the same gate (hidden Interactables stay clickable), so a
-  // button never fires while it is not really being offered.
+  // The one loop that runs the finish: offer the report once all four are done,
+  // play the staged reveal while it is open, and drive the three buttons. The
+  // reveal eases each bar and flips the shown / title flags over time, so the card
+  // fills smoothly with no flashing. Visibility AND press-handling share the same
+  // gate (hidden Interactables stay clickable). setInterval only.
+  let seeReportWasPressed = false;
+  let returnToMapWasPressed = false;
+  let saveReportWasPressed = false;
   setInterval(function () {
     const allDone = STOPS.every(function (s) { return s.done; });
     const onMap = hubGroup.visible && currentView === "hub";
@@ -5358,8 +5472,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // landmark to revisit it), drop the overlay so it cannot bleed into the stop.
     if (reportOpen && !onMap) reportOpen = false;
 
-    // --- The offer: only on the map, only once all four stops are finished, and
-    // only while the report is not already open. ---
+    // --- The offer banner: only on the map, only once all four stops are finished,
+    // and only while the report is not already open. ---
     const showSee = allDone && onMap && !reportOpen;
     seeReportBtn.mesh.visible = showSee;
     if (showSee) {
@@ -5373,19 +5487,66 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       seeReportWasPressed = !!seeReportBtn.entity.hasComponent(Pressed); // swallow a carried press so it cannot fire on reveal
     }
 
-    // --- The report card + its "Return to the map" button, shown together. ---
+    // --- The report card + its staged reveal ---
     const reportUp = reportOpen && onMap;
-    if (m6ReportPanel.object3D) m6ReportPanel.object3D.visible = reportUp;
-    reportReturnBtn.mesh.visible = reportUp;
+    reportCard.mesh.visible = reportUp;
     if (reportUp) {
-      const hov = !!reportReturnBtn.entity.hasComponent(Hovered);
-      const prs = !!reportReturnBtn.entity.hasComponent(Pressed);
-      reportReturnBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
-      if (prs && !returnToMapWasPressed) closeReport();
-      returnToMapWasPressed = prs;
+      revealElapsed += REPORT.TICK_MS;
+      let dirty = false;
+      // Each meter starts filling in turn; its bar eases toward its score, and its
+      // stars + line appear once it is essentially full (a soft tick on each).
+      for (let i = 0; i < reportState.meters.length; i++) {
+        const m = reportState.meters[i];
+        if (revealElapsed >= REPORT.STOPS_HOLD_MS + i * REPORT.METER_GAP_MS) {
+          const before = m.fill01;
+          m.fill01 += (1 - m.fill01) * REPORT.FILL_EASE;
+          if (Math.abs(m.fill01 - before) > 0.001) dirty = true;
+          if (!m.shown && m.fill01 > 0.985) { m.shown = true; dirty = true; sfxClick(); }
+        }
+      }
+      // The Virginia title lands last, with a warm cue.
+      if (!reportState.titleShown && revealElapsed >= REPORT.TITLE_AT_MS) {
+        reportState.titleShown = true; dirty = true; sfxFanfare();
+      }
+      if (dirty) reportCard.draw(reportState);
+
+      // Return appears once the stamps are up (so it is never a dead end); Save
+      // appears once the whole report has revealed. Both gated like the banner.
+      const showReturn = revealElapsed >= REPORT.RETURN_AT_MS;
+      reportReturnBtn.mesh.visible = showReturn;
+      if (showReturn) {
+        const hov = !!reportReturnBtn.entity.hasComponent(Hovered);
+        const prs = !!reportReturnBtn.entity.hasComponent(Pressed);
+        reportReturnBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
+        if (prs && !returnToMapWasPressed) closeReport();
+        returnToMapWasPressed = prs;
+      } else {
+        returnToMapWasPressed = !!reportReturnBtn.entity.hasComponent(Pressed);
+      }
+
+      const showSave = revealElapsed >= REPORT.SAVE_AT_MS;
+      reportSaveBtn.mesh.visible = showSave;
+      if (showSave) {
+        const hov = !!reportSaveBtn.entity.hasComponent(Hovered);
+        const prs = !!reportSaveBtn.entity.hasComponent(Pressed);
+        reportSaveBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
+        if (prs && !saveReportWasPressed) {
+          openPrintable();              // bring up the teacher's printable page on the laptop
+          if (!reportState.savedNote) { reportState.savedNote = "Report saved for your teacher."; reportCard.draw(reportState); }
+          sfxClick();
+        }
+        saveReportWasPressed = prs;
+      } else {
+        saveReportWasPressed = !!reportSaveBtn.entity.hasComponent(Pressed);
+      }
     } else {
+      // Closed or off the map: hide both card buttons and swallow any carried press.
+      reportReturnBtn.mesh.visible = false;
+      reportSaveBtn.mesh.visible = false;
       reportReturnBtn.mesh.scale.setScalar(1);
+      reportSaveBtn.mesh.scale.setScalar(1);
       returnToMapWasPressed = !!reportReturnBtn.entity.hasComponent(Pressed);
+      saveReportWasPressed = !!reportSaveBtn.entity.hasComponent(Pressed);
     }
   }, REPORT.TICK_MS);
 
