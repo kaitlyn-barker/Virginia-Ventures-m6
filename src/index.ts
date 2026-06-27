@@ -273,7 +273,7 @@ type DecisionPack = { setup: string; decisions: Decision[] };
 const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
   tech: {
     setup:
-      "A company wants to build a new data center, a giant building full of computers that helps run the internet. You make three choices to set it up.",
+      "Welcome to a tech company in Northern Virginia. Make three smart choices to build a data center.",
     decisions: [
       {
         question: "Where should we build it?",
@@ -353,7 +353,7 @@ const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
   // is neutral. The reusable runner and the meter math read this; nothing hardcoded.
   tourism: {
     setup:
-      "You run a historic site in Colonial Williamsburg, where visitors come to see how Virginians lived long ago. You make three choices to welcome visitors and protect the site.",
+      "Welcome to historic Colonial Williamsburg. Make three choices to welcome visitors and protect the site.",
     decisions: [
       {
         question: "How will you price tickets?",
@@ -434,7 +434,7 @@ const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
   // is NEUTRAL. The reusable runner and the meter math read this; nothing hardcoded.
   farm: {
     setup:
-      "You run a modern farm in the Shenandoah Valley. Farming did not disappear in Virginia, it got smarter. You make three choices to grow a great harvest using new technology.",
+      "Welcome to a modern farm in the Shenandoah Valley. Make three choices to grow a great harvest with new technology.",
     decisions: [
       {
         question: "How will you plant your crops?",
@@ -4530,10 +4530,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       mesh.renderOrder = 50000;
     }
 
-    // (1) The intro: the goal + the controls, in a friendly fifth-grade voice.
+    // (1) The arrival card: the place name + one friendly line about the task, in the
+    // SAME short arrival-card style the three decision stops use (name + line + Start).
+    // Start dismisses it and begins play; the in-play hint below reminds the controls.
     const introPanel = makeTextPanel(
-      "Ships Are Leaving!",
-      "Send each container to the ship with the same color. Tap a container, then tap its matching ship.",
+      "Port of Virginia",
+      "Welcome to the Port of Virginia in Norfolk. Load each container onto the ship that matches its color.",
       PORT.INTRO_W,
     );
     onTop(introPanel);
