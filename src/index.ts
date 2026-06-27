@@ -31,13 +31,14 @@ import {
   MeshBasicMaterial,
   CanvasTexture,
   SRGBColorSpace,
+  RepeatWrapping,
   DoubleSide,
 } from "@iwsdk/core";
 
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
 import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
-import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience } from "./sfx";
+import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, sfxShipHorn, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience, startPortAmbience, stopPortAmbience } from "./sfx";
 
 // ============================================================================
 // ECONOMIC CONSTANTS  (carried over; the stages read these in later prompts)
@@ -852,8 +853,9 @@ const FARM_VALLEY = {
 // it with a happy cue; the wrong ship gently refuses and the container drifts
 // back to the dock. No choice ever fails. All positions are WORLD coordinates
 // (the student spawns near z = +7 and looks toward -z, so smaller z is farther
-// out over the water). The game reads ONLY this block; timers, the conveyor, and
-// real scoring arrive in later prompts.
+// out over the water). The game reads ONLY this block. Scoring (correct loads -> the
+// three meters + result), a slow MOVING CONVEYOR supply, and ambient SHIP DEPARTURES
+// (sail out + a fresh same-destination ship pulls in) are all wired here now.
 // ============================================================================
 const PORT = {
   TICK_MS: 33,                 // every port loop runs on setInterval (rAF pauses in headset)
@@ -877,16 +879,31 @@ const PORT = {
   PAD_W: 1.5, PAD_H: 0.9, PAD_D: 1.05,  // hit-pad size (m); short on purpose (see above)
   PAD_Y: 0.4,                           // hit-pad center height; top ~0.85 stays under the Finish ray
   SHIP_HOVER_GLOW: 0.28,                // faint gold on a ship while the ray rests on it
-  // ---- the container supply: a fixed handful on a dock shelf in front of the
-  // student that recycles, so a few are always available (the conveyor comes later).
+  // ---- the moving CONVEYOR supply ----  Containers ride a slow LEFT->RIGHT belt into
+  // the student's reach and are tapped there. Spacing is guaranteed by N fixed belt
+  // "slots" that travel together and wrap; each slot's container scales 0<->1 near the
+  // belt ends (the seam), so a container grows in at the left, rides across full-size,
+  // shrinks away at the right, and the wrap itself is never a visible jump. The belt
+  // travel is the only constant supply motion and is slow + calm. Driven on setInterval.
   CONTAINER: 0.34,            // container cube size (m)
-  SLOTS: [                    // dock-shelf slots (world pos), in easy view ahead of the spawn
-    [-1.5, 1.0, 5.6], [-0.75, 1.0, 5.6], [0.0, 1.0, 5.6], [0.75, 1.0, 5.6], [1.5, 1.0, 5.6],
-  ] as [number, number, number][],
-  SHELF_Y: 0.78, SHELF_W: 3.9, SHELF_D: 0.74, SHELF_Z: 5.6,  // plank shelf the resting containers sit on
+  BELT_N: 5,                  // containers riding the belt at once (the moving "slots")
+  BELT_X_MIN: -2.3, BELT_X_MAX: 2.3, // belt span in x; the whole run sits in easy reach
+  BELT_Y: 1.0,               // container center height riding the belt
+  BELT_Z: 5.6,               // belt depth: the reach line, just ahead of the spawn
+  BELT_SPEED: 0.26,          // belt travel speed (m/s) — slow and calm
+  BELT_SEAM_FRAC: 0.16,      // fraction of the belt at EACH end where a container scales 0<->1 (hides the wrap)
+  BELT_TAP_MIN_SCALE: 0.82,  // a container is only tappable once it has scaled in past this (clear of the ends)
+  ENTER_MS: 300,             // a refilled / returned container scales back in over this, so it never pops
   START_COLORS: ["europe", "asia", "usa", "asia", "europe"], // a spread of all three to begin
-  REFILL_CYCLE: ["usa", "europe", "asia"],                   // refill an emptied slot, cycling colors
+  REFILL_CYCLE: ["usa", "europe", "asia"],                   // a loaded container comes back in this color, cycling
   PARK_Y: -100,              // a loaded container parks far below the world: invisible AND out of any aim
+  // ---- the belt STRUCTURE (drawn in buildPortGame): a dark bed with a scrolling
+  // chevron surface, two side rails, end rollers, and legs down to the dock. ----
+  BELT_BED_COLOR: "#34393f", BELT_CHEVRON: "#525a62", BELT_RAIL_COLOR: "#787f86",
+  BELT_ROLLER_COLOR: "#9aa0a7", BELT_LEG_COLOR: "#5e4a30",
+  BELT_BED_D: 0.66,          // belt depth in z (the bed + the container footprint)
+  BELT_BED_PAD: 0.5,         // how far the bed/rollers extend past the slot span at each end
+  BELT_CHEVRON_REPEAT: 14,   // chevrons tiled along the bed (scrolls to show motion)
   // ---- tap-to-select + fly feel ----  A tapped container lifts and glows so it is
   // clearly the chosen one; tapping a ship then sends it on a smooth arc to the deck.
   SELECT_LIFT: 0.18,         // how far a selected container rises above its slot (m)
@@ -903,13 +920,71 @@ const PORT = {
   RETURN_MS: 280,            // a wrong ship eases the container back to its shelf slot over this
   REFILL_MS: 460,            // a beat after a load before a fresh container appears in the slot
   TINT_FALL: 0.05,           // how fast the red "wrong ship" blink on a container fades
+  // ---- SHIP DEPARTURE CYCLE ----  A busy working port: each ship loads at its berth
+  // for a calm stretch, then sails out to sea (shrinking into the distance with a soft
+  // horn) and a fresh ship of the SAME destination pulls in to take the berth. The three
+  // labeled berths (EUROPE/ASIA/USA) are therefore ALWAYS present, so matching, scoring,
+  // the round, and the directions never change — this is ambient life, not a deadline,
+  // and there is no fail. Staggered so the berths are rarely empty together. setInterval.
+  DOCK_MS_FIRST: 13000,      // a generous first stretch docked, so the student loads before any ship leaves
+  DOCK_MS: 16000,            // how long a ship stays docked on later cycles
+  DOCK_STAGGER: 5200,        // per-ship offset so the three never depart in lockstep
+  SAIL_MS: 4500,             // a slow, smooth sail OUT (ease-in, shrinking away)
+  ARRIVE_MS: 4500,           // a slow, smooth sail IN (ease-out, growing as it nears)
+  SAIL_OUT_Z: -8.5,          // world z a departing ship recedes to (far out over the water)
+  SAIL_OUT_SCALE: 0.18,      // a departing ship shrinks to this as it recedes, then hides (reads as "gone")
   // ---- the dock + harbor backdrop ----
   DOCK_COLOR: "#9c7b4f", DOCK_TRIM: "#7d6038", PILING: "#5e4a30",
   WATER_COLOR: "#2b6c8f", WATER_SHIMMER: 0.1, WATER_HZ: 0.05,
   CRANE: "#c8543a", CRANE_LEG: "#9a9ea3",   // distant dock cranes, harbor flavor only
-  // ---- the TEMPORARY debug count readout (replaced by real scoring later) ----
+  // ---- two TALL loading cranes that frame the dock (drawn in buildPortScene) ----
+  // Placed at the far sides, well outside the ship row and the conveyor, so they never
+  // block the ships, containers, panels, or counts. Tower + horizontal jib + a hanging
+  // cable/hook, all static (the moving belt + sailing ships carry the motion).
+  LOAD_CRANE_X: 3.5,         // |x| of each tall crane (outside the |1.7| ship row and |2.3| belt)
+  LOAD_CRANE_Z: 4.3,         // z of the tall cranes (alongside the ships, over the water edge)
+  LOAD_CRANE_H: 4.2,         // tower height (tall, reads as a real loading crane)
+  LOAD_CRANE_JIB: 2.4,       // jib arm length, reaching out over the water (toward -z)
+  LOAD_CRANE_TOWER: "#c8543a", LOAD_CRANE_FRAME: "#9a9ea3", LOAD_CRANE_CABLE: "#3a3f45",
+  // ---- a warm sky: a wide gradient backdrop low on the horizon + a soft sun, both far
+  // behind everything so they never interfere. The sun sits off to one side, not behind
+  // a ship sign. ----
+  SKY_Z: -16, SKY_W: 66, SKY_H: 32, SKY_Y: 11,   // the warm gradient backdrop, far out and wide
+  // a warm, hazy late-afternoon sky: warm mauve-grey up high easing through peach to a
+  // golden horizon, so even the upper sky (all that shows above the ships) reads warm.
+  SKY_TOP: "#cdbcc6", SKY_MID: "#edcaa6", SKY_HORIZON: "#f4bd82",
+  SUN_POS: [-6.5, 3.2, -14] as [number, number, number], SUN_R: 1.1, SUN_COLOR: "#ffd9a0",
+  // ---- the live SHIPPED manifest (per-ship counts + a running total) ----
+  // Friendly in-play feedback so the student sees their haul grow; the final tally
+  // also drives the result panel + the three-meter award below.
   DEBUG_POS: [-2.35, 2.25, 4.9] as [number, number, number],
   DEBUG_W: 1.15, DEBUG_H: 0.92,
+  // ---- SCORING: correct loads -> the three meters ----  The Port LEANS ON Economic
+  // Impact (the other three stops lean on Innovation and Problem Solving). Every
+  // container dropped on its MATCHING ship adds these; a wrong tap never subtracts, it
+  // only costs the student a little time. There is no fail state.
+  SCORE_PER_LOAD: { ei: 3, it: 1, ps: 2 },     // per correct load; EI is the largest
+  // A small GLOBAL-TRADE bonus: getting at least one container onto ALL THREE ships
+  // rewards using the whole trade network. Added once, before the cap below.
+  ALL_SHIPS_BONUS: { ei: 0, it: 5, ps: 0 },    // +5 Innovation when every ship got one
+  // A marathon session still stays inside one stop's share of the 0..100 meters (the
+  // decision stops top out near here too), so the Port can never swamp the report.
+  SCORE_MAX: { ei: 36, it: 18, ps: 24 },
+  // ---- result lines by haul size (ALL positive; no losing). The count of correctly
+  // shipped containers picks the tier. ----
+  HAUL_BIG_AT: 8,   // this many correct loads or more -> the top line
+  HAUL_MID_AT: 4,   // 4..7 -> the middle line; 1..3 -> the warm line
+  RESULT_BIG:  "Amazing work! You kept the whole world trading through Virginia.",
+  RESULT_MID:  "Great job! You sent goods out to ports across the globe.",
+  RESULT_WARM: "Nice start! Every container helps Virginia trade with the world.",
+  // ---- the round-end FINISH button -> result panel -> RETURN button ----  The student
+  // loads at their own pace; FINISH (lower-right, kept clear of the ship pads) ends the
+  // round and brings up the result. RETURN (same spot, shown WITH the result) lands the
+  // score and fades back to the map. The result card rides the calm panel depth (z~3.3)
+  // the intro uses and draws on top, so it never clips the dock or ships.
+  FINISH_POS: [1.7, 0.9, 3.45] as [number, number, number], FINISH_W: 1.0, FINISH_H: 0.36,
+  RETURN_POS: [1.7, 0.9, 3.45] as [number, number, number], RETURN_W: 1.5, RETURN_H: 0.36,
+  RESULT_POS: [0, 1.82, 3.3] as [number, number, number], RESULT_W: 2.2,
   // ---- on-arrival DIRECTIONS (guidance only; mechanic/count/timers are untouched) ----
   // An intro panel + Start button explain the goal, then a short hint follows the play.
   // All sit ABOVE the dock and draw on top (depthTest off), so they never cover the ships,
@@ -2318,15 +2393,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       startDecisionPack(stop, pack);
       return;
     }
-    // The Port of Virginia is the SIGNATURE stop: a custom container-loading game,
-    // not a decision pack. Show its dock scene, start the game, and reveal the
-    // shared Finish button as a TEMPORARY return while the game is built out. With
-    // no pendingAward set, Finish completes the port with VISIT.PLACEHOLDER_AWARD;
-    // real scoring replaces that in a later prompt.
+    // The Port of Virginia is the SIGNATURE stop: a custom container-loading game, not a
+    // decision pack. Show its dock scene and start the game. The Port owns its OWN finish
+    // flow (the shell's shared Finish button stays hidden): the student loads at their pace,
+    // taps FINISH to end the round and bring up the result with the real pendingAward, then
+    // taps RETURN to land the score (finishStop -> completeStop) and fade back to the map.
     if (stop.id === "port") {
       showStopScene("port");
+      startPortAmbience(); // soft harbor wash + distant gulls; entry is the first action, so audio is unlocked
       if (portGame) portGame.start();
-      if (finishBtn.object3D) finishBtn.object3D.visible = true;
       return;
     }
     // Rebuild the description for THIS stop (cheap, and it happens under full cover).
@@ -2353,6 +2428,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     stopHum();             // fade out the Tech Office room ambience as we leave
     stopVillageAmbience(); // fade out the Tourism village ambience as we leave
     stopFarmAmbience();    // fade out the Modern Farm rural ambience as we leave
+    stopPortAmbience();    // fade out the Port harbor ambience as we leave
   }
 
   // ---- THE VISIT: enter on a landmark select, finish on the button ----
@@ -4050,17 +4126,45 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       pile.position.set(px, -0.35, 3.3);
       g.add(pile);
     }
-    // a plank shelf the supply of containers rests on, so they read as cargo on the
-    // pier rather than floating boxes; two legs carry it down to the dock.
-    const shelf = meshBox(PORT.SHELF_W, 0.12, PORT.SHELF_D, PORT.DOCK_TRIM);
-    shelf.position.set(0, PORT.SHELF_Y, PORT.SHELF_Z);
-    g.add(shelf);
-    for (const lx of [-1.7, 1.7]) {
-      const leg = meshBox(0.14, PORT.SHELF_Y, 0.14, PORT.PILING);
-      leg.position.set(lx, PORT.SHELF_Y / 2, PORT.SHELF_Z);
-      g.add(leg);
-    }
-    // distant dock cranes, well past the ships and never in reach.
+    // (The container supply is now a MOVING CONVEYOR, built in buildPortGame so its
+    // travel animates with the containers; the old static plank shelf is gone.)
+
+    // A WARM SKY: a wide gradient backdrop low on the horizon (soft blue easing to a
+    // warm peach), far out behind everything so it never interferes. Drawn unlit.
+    const skyCanvas = document.createElement("canvas");
+    skyCanvas.width = 16; skyCanvas.height = 256;
+    const sctx = skyCanvas.getContext("2d") as CanvasRenderingContext2D;
+    const grad = sctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, PORT.SKY_TOP);
+    grad.addColorStop(0.52, PORT.SKY_MID);
+    grad.addColorStop(1, PORT.SKY_HORIZON);
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, 16, 256);
+    const skyTex = new CanvasTexture(skyCanvas);
+    skyTex.colorSpace = SRGBColorSpace;
+    const sky = new Mesh(
+      new PlaneGeometry(PORT.SKY_W, PORT.SKY_H),
+      // OPAQUE (writes depth): a far plane at z=-16 that occludes the default sky behind it
+      // and is itself occluded by the nearer ships / belt / water. (A non-depth-writing
+      // version got overdrawn by the default skydome.)
+      new MeshBasicMaterial({ map: skyTex }),
+    );
+    sky.position.set(0, PORT.SKY_Y, PORT.SKY_Z);
+    g.add(sky);
+    // a soft low sun, off to one side (never behind a ship sign): a warm emissive disc
+    // with a faint halo. Far out, in front of the sky band.
+    const halo = meshSphere(PORT.SUN_R * 2.1, PORT.SUN_COLOR);
+    (halo.material as any).transparent = true; (halo.material as any).opacity = 0.16;
+    (halo.material as any).depthWrite = false;
+    halo.position.set(PORT.SUN_POS[0], PORT.SUN_POS[1], PORT.SUN_POS[2] + 0.2);
+    g.add(halo);
+    const sun = meshSphere(PORT.SUN_R, PORT.SUN_COLOR);
+    (sun.material as any).emissive = new Color(PORT.SUN_COLOR);
+    (sun.material as any).emissiveIntensity = 0.9;
+    sun.position.set(PORT.SUN_POS[0], PORT.SUN_POS[1], PORT.SUN_POS[2]);
+    g.add(sun);
+
+    // distant dock cranes, well past the ships and never in reach (harbor depth).
     for (const cx of [-4.7, -2.4, 2.5, 4.7]) {
       const crane = new Group();
       for (const lx of [-0.4, 0.4]) {
@@ -4075,6 +4179,40 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       arm.position.set(0, 2.5, 0.9);
       crane.add(arm);
       crane.position.set(cx, 0, -2.8);
+      g.add(crane);
+    }
+
+    // TWO TALL LOADING CRANES framing the dock at the far sides (outside the ship row
+    // and the conveyor), each a tower + a jib reaching out over the water + a hanging
+    // cable and hook. Static; the moving belt and sailing ships carry the motion.
+    for (const cx of [-PORT.LOAD_CRANE_X, PORT.LOAD_CRANE_X]) {
+      const crane = new Group();
+      const H = PORT.LOAD_CRANE_H;
+      const tower = meshBox(0.34, H, 0.34, PORT.LOAD_CRANE_TOWER);
+      tower.position.set(0, H / 2, 0);
+      crane.add(tower);
+      for (const ry of [H * 0.32, H * 0.62]) { // a couple of rungs hint at a lattice tower
+        const rung = meshBox(0.46, 0.08, 0.46, PORT.LOAD_CRANE_FRAME);
+        rung.position.set(0, ry, 0);
+        crane.add(rung);
+      }
+      const cab = meshBox(0.5, 0.4, 0.5, PORT.LOAD_CRANE_FRAME); // operator cab near the top
+      cab.position.set(0, H - 0.55, 0.22);
+      crane.add(cab);
+      const jib = meshBox(0.16, 0.16, PORT.LOAD_CRANE_JIB, PORT.LOAD_CRANE_FRAME); // arm over the water (-z)
+      jib.position.set(0, H, -PORT.LOAD_CRANE_JIB / 2 + 0.2);
+      crane.add(jib);
+      const counter = meshBox(0.16, 0.16, 0.8, PORT.LOAD_CRANE_FRAME); // short counter-jib (+z)
+      counter.position.set(0, H, 0.6);
+      crane.add(counter);
+      const cableZ = -PORT.LOAD_CRANE_JIB + 0.5; // cable hangs from out along the jib
+      const cable = meshCyl(0.02, 0.02, H * 0.5, PORT.LOAD_CRANE_CABLE);
+      cable.position.set(0, H - H * 0.25, cableZ);
+      crane.add(cable);
+      const hook = meshBox(0.16, 0.16, 0.16, PORT.LOAD_CRANE_FRAME);
+      hook.position.set(0, H - H * 0.5, cableZ);
+      crane.add(hook);
+      crane.position.set(cx, 0, PORT.LOAD_CRANE_Z);
       g.add(crane);
     }
     function tick(clock: number) {
@@ -4126,10 +4264,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // selected container. The pad is its OWN entity (createTransformEntity reparents it to
     // the scene root), invisible (opacity 0) yet still a ray target; start()/stop() toggle
     // its visibility so it is tappable only inside the port and never blocks the hub. ----
+    // x/z are the fixed BERTH coords; the ship's live group.position.z slides out and
+    // back during a departure cycle. state: "docked" (loadable, pad on) -> "sailing"
+    // (out to sea, pad off) -> "arriving" (a fresh same-destination ship pulls in) ->
+    // "docked". dockTimer counts the calm docked stretch; sailT drives the sail anim.
     const ships: {
       key: string; x: number; z: number; group: Group; hull: any; pulse: number;
       pad: any; padMesh: any; padWasPressed: boolean;
+      state: string; dockTimer: number; sailT: number;
     }[] = [];
+    let shipIdx = 0;
     for (const s of PORT.SHIPS) {
       const built = buildShip(s);
       group.add(built.group);
@@ -4142,7 +4286,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       padMesh.visible = false;                      // shown only inside the port (start/stop)
       const pad = world.createTransformEntity(padMesh).addComponent(Interactable);
       ships.push({ key: s.key, x: s.pos[0], z: s.pos[2], group: built.group, hull: built.hull,
-                   pulse: 0, pad, padMesh, padWasPressed: false });
+                   pulse: 0, pad, padMesh, padWasPressed: false,
+                   state: "docked", dockTimer: PORT.DOCK_MS_FIRST + shipIdx * PORT.DOCK_STAGGER, sailT: 0 });
+      shipIdx++;
     }
 
     // The empty-water deselect catcher (see CONSTANTS): a big invisible plane BEHIND every
@@ -4158,7 +4304,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const catchEntity = world.createTransformEntity(catchMesh).addComponent(Interactable);
     let catchWasPressed = false;
 
-    // ---- the TEMPORARY debug count readout (a canvas panel; real scoring replaces it) ----
+    // ---- the live SHIPPED manifest (a canvas panel): per-ship correct-load counts +
+    // a running total. It is the student's in-play feedback AND the score source: the
+    // final counts drive the result panel and the three-meter award on round-end. ----
     const counts: Record<string, number> = { europe: 0, asia: 0, usa: 0 };
     const panelCanvas = document.createElement("canvas");
     panelCanvas.width = 512; panelCanvas.height = 410;
@@ -4186,7 +4334,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       pctx.textBaseline = "middle";
       pctx.textAlign = "left";
       pctx.font = "bold 38px sans-serif";
-      pctx.fillText("LOADED (debug)", 34, 54);
+      pctx.fillText("SHIPPED", 34, 54);
       const rows: [string, string][] = [["Europe", "europe"], ["Asia", "asia"], ["United States", "usa"]];
       let y = 128;
       for (const [label, key] of rows) {
@@ -4212,22 +4360,82 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       panelTex.needsUpdate = true;
     }
 
-    // ---- the recycling container supply ----
+    // ======================================================================
+    // THE MOVING CONVEYOR  —  a slow left->right belt that carries the supply into reach.
+    // The belt has BELT_N evenly-spaced "slots" that travel together and wrap; a container
+    // rides its slot. slotX/slotScale below place each slot and fade it 0<->1 near the belt
+    // ends, so containers grow in at the left, ride across full size, and shrink away at the
+    // right (the wrap is never a visible jump). beltOffset is advanced in tick (setInterval).
+    // ======================================================================
+    const BELT_LEN = PORT.BELT_X_MAX - PORT.BELT_X_MIN;
+    const BELT_STEP = BELT_LEN / PORT.BELT_N;          // spacing between neighbouring slots
+    const BELT_TOP_Y = PORT.BELT_Y - PORT.CONTAINER / 2; // belt surface (containers sit on it)
+    let beltOffset = 0;                                 // how far the belt has travelled (mod BELT_LEN)
+    function smoothstep(t: number) { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); }
+    function slotPhase(i: number) { return (beltOffset + i * BELT_STEP) % BELT_LEN; }
+    function slotX(i: number) { return PORT.BELT_X_MIN + slotPhase(i); }
+    function slotScale(i: number) {              // 0 at the belt ends (the seam), 1 across the middle
+      const p = slotPhase(i);
+      const distToSeam = Math.min(p, BELT_LEN - p);
+      return smoothstep(distToSeam / (PORT.BELT_SEAM_FRAC * BELT_LEN));
+    }
+
+    // The belt STRUCTURE: a dark bed with a scrolling chevron surface (the motion cue),
+    // two side rails, two end rollers, and legs down to the dock. All static geometry;
+    // only the chevron texture offset scrolls (in tick), matching the container travel.
+    const beltCenterX = (PORT.BELT_X_MIN + PORT.BELT_X_MAX) / 2;
+    const beltFullLen = BELT_LEN + PORT.BELT_BED_PAD * 2;
+    const chevCanvas = document.createElement("canvas");
+    chevCanvas.width = 128; chevCanvas.height = 64;
+    const cvx = chevCanvas.getContext("2d") as CanvasRenderingContext2D;
+    cvx.fillStyle = PORT.BELT_BED_COLOR; cvx.fillRect(0, 0, 128, 64);
+    cvx.strokeStyle = PORT.BELT_CHEVRON; cvx.lineWidth = 10; cvx.lineCap = "round";
+    for (const ox of [16, 80]) {                  // two ">" chevrons per tile, pointing in the travel direction
+      cvx.beginPath(); cvx.moveTo(ox, 14); cvx.lineTo(ox + 26, 32); cvx.lineTo(ox, 50); cvx.stroke();
+    }
+    const chevTex = new CanvasTexture(chevCanvas);
+    chevTex.colorSpace = SRGBColorSpace;
+    chevTex.wrapS = RepeatWrapping; chevTex.wrapT = RepeatWrapping;
+    chevTex.repeat.set(PORT.BELT_CHEVRON_REPEAT, 1);
+    const bed = meshBox(beltFullLen, 0.1, PORT.BELT_BED_D, PORT.BELT_BED_COLOR);
+    (bed.material as any).map = chevTex;
+    bed.position.set(beltCenterX, BELT_TOP_Y - 0.05, PORT.BELT_Z);
+    group.add(bed);
+    for (const dz of [-PORT.BELT_BED_D / 2, PORT.BELT_BED_D / 2]) { // two side rails
+      const rail = meshBox(beltFullLen + 0.1, 0.12, 0.06, PORT.BELT_RAIL_COLOR);
+      rail.position.set(beltCenterX, BELT_TOP_Y + 0.02, PORT.BELT_Z + dz);
+      group.add(rail);
+    }
+    for (const dx of [-beltFullLen / 2, beltFullLen / 2]) {        // two end rollers (cylinders across z)
+      const roller = meshCyl(0.1, 0.1, PORT.BELT_BED_D + 0.04, PORT.BELT_ROLLER_COLOR);
+      roller.rotation.x = Math.PI / 2;
+      roller.position.set(beltCenterX + dx, BELT_TOP_Y - 0.02, PORT.BELT_Z);
+      group.add(roller);
+    }
+    for (const lx of [beltCenterX - beltFullLen / 2 + 0.3, beltCenterX + beltFullLen / 2 - 0.3]) {
+      const leg = meshBox(0.14, BELT_TOP_Y - 0.1, 0.14, PORT.BELT_LEG_COLOR); // legs down to the dock
+      leg.position.set(lx, (BELT_TOP_Y - 0.1) / 2, PORT.BELT_Z);
+      group.add(leg);
+    }
+
+    // ---- the recycling container supply (now riding the conveyor) ----
     // Each container is a cube ENTITY the student TAPS to select (Interactable, the same
     // ray the map landmarks and the choice cards use). Its STATE drives everything: an idle
-    // cube rests on its dock slot; a selected one lifts and glows; a flying one arcs to a
+    // cube rides its belt slot; a selected one lifts and glows; a flying one arcs to a
     // ship; a loaded one parks far below the world (invisible AND, thanks to the hidden-
-    // target hit guard, untappable) until its slot refills. Rotation/scale stay locked so
-    // the cube reads upright and its color stays clear.
+    // target hit guard, untappable) until it rejoins the belt. Rotation stays locked so
+    // the cube reads upright and its color stays clear (scale carries the belt-end fade).
     type Cont = {
       entity: any; mesh: any; key: string; slot: number; state: string; wasPressed: boolean;
       fx: number; fy: number; fz: number;         // flight / return START point (world)
       tx: number; ty: number; tz: number;         // flight TARGET point: the ship deck (world)
       targetShip: any;                            // the ship a flying container is bound for
       t: number; dur: number; tint: number; timer: number;
+      heldX: number;                              // x frozen while selected, so a lifted cube does not drift with the belt
+      appearT: number;                            // scale-in ramp (ms) when (re)joining the belt, so it never pops
     };
     const conts: Cont[] = [];
-    for (let i = 0; i < PORT.SLOTS.length; i++) {
+    for (let i = 0; i < PORT.BELT_N; i++) {
       const mesh = meshBox(PORT.CONTAINER, PORT.CONTAINER, PORT.CONTAINER, "#ffffff");
       (mesh.material as any).emissive = new Color(PORT.WRONG_GLOW); // red "wrong ship" blink; gold while selected
       (mesh.material as any).emissiveIntensity = 0;
@@ -4236,7 +4444,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       const entity = world.createTransformEntity(mesh).addComponent(Interactable);
       conts.push({ entity, mesh, key: "europe", slot: i, state: "parked", wasPressed: false,
                    fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0, targetShip: null,
-                   t: 0, dur: 0, tint: 0, timer: 0 });
+                   t: 0, dur: 0, tint: 0, timer: 0, heldX: 0, appearT: PORT.ENTER_MS });
     }
     let selectedCont: Cont | null = null;  // the one tapped container (lifts + glows), or none
     let flyingCont: Cont | null = null;    // the one container mid-arc, or none (only one at a time)
@@ -4248,6 +4456,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // ships / containers / count, and text redraws only on a change (nothing flashes).
     // ======================================================================
     let portStarted = false;                 // false while the intro is up; true once Start is tapped
+    let ended = false;                        // true once the round is over and the result is up
+    let resultMesh: any = null;               // the result readout card (rebuilt each round-end)
     function onTop(mesh: any) {               // always readable, never depth-clipped by sky/ships
       (mesh.material as any).depthTest = false;
       (mesh.material as any).depthWrite = false;
@@ -4274,6 +4484,28 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     startBtnMesh.visible = false;
     const startBtn = world.createTransformEntity(startBtnMesh).addComponent(Interactable);
     let startWasPressed = false;
+
+    // The FINISH button: the student taps it when their haul is in, which ENDS the round
+    // and brings up the result. Its own Interactable, like the Start button; shown only
+    // during live play. (The ambient ships sailing out and back are flavor only — they
+    // never end the round; FINISH is the one and only round-ender.)
+    const portFinishMesh = makeButtonCard("Finish", PORT.FINISH_W, PORT.FINISH_H);
+    onTop(portFinishMesh);
+    portFinishMesh.renderOrder = 50001;
+    portFinishMesh.position.set(PORT.FINISH_POS[0], PORT.FINISH_POS[1], PORT.FINISH_POS[2]);
+    portFinishMesh.visible = false;
+    const portFinishBtn = world.createTransformEntity(portFinishMesh).addComponent(Interactable);
+    let portFinishWasPressed = false;
+
+    // The RETURN button: shown WITH the result panel; a fresh press lands the score (the
+    // shell's finishStop -> completeStop with the real pendingAward) and fades to the map.
+    const returnMesh = makeButtonCard("Return to the map", PORT.RETURN_W, PORT.RETURN_H);
+    onTop(returnMesh);
+    returnMesh.renderOrder = 50001;
+    returnMesh.position.set(PORT.RETURN_POS[0], PORT.RETURN_POS[1], PORT.RETURN_POS[2]);
+    returnMesh.visible = false;
+    const returnBtn = world.createTransformEntity(returnMesh).addComponent(Interactable);
+    let returnWasPressed = false;
 
     // (2) The following hint: one short line on a navy pill near the dock, reworded as the
     // state changes (nothing selected -> pick one; one selected -> send it to its match).
@@ -4318,11 +4550,74 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
     function beginPlay() {                    // Start tapped: clear the intro, bring up the hint
       portStarted = true;
+      ended = false;
       introPanel.visible = false;
       startBtnMesh.visible = false;
+      portFinishMesh.visible = true;          // the FINISH round-ender is now available
+      portFinishMesh.scale.setScalar(1);
+      portFinishWasPressed = !!portFinishBtn.hasComponent(Pressed); // never fire on a carried-over press
       hintMesh.visible = true;
       hintState = "pick"; drawHint("Tap a container to pick it up");
       sfxClick();
+    }
+
+    // ---- SCORING ----  Turn the correct-load counts into the three meters: every
+    // matched container adds PORT.SCORE_PER_LOAD (EI largest), plus the one-time
+    // global-trade Innovation bonus if all three ships got at least one. Capped so a
+    // long session stays inside one stop's share of the 0..100 meters. Wrong taps were
+    // never counted, so they cost only time; there is no penalty here. (Module 6's
+    // three meters: Economic Impact = ei, Innovation Thinking = it, Problem Solving = ps.)
+    function computeAward() {
+      const total = (counts.europe || 0) + (counts.asia || 0) + (counts.usa || 0);
+      const allShips = (counts.europe || 0) > 0 && (counts.asia || 0) > 0 && (counts.usa || 0) > 0;
+      let ei = total * PORT.SCORE_PER_LOAD.ei;
+      let it = total * PORT.SCORE_PER_LOAD.it;
+      let ps = total * PORT.SCORE_PER_LOAD.ps;
+      if (allShips) { ei += PORT.ALL_SHIPS_BONUS.ei; it += PORT.ALL_SHIPS_BONUS.it; ps += PORT.ALL_SHIPS_BONUS.ps; }
+      ei = Math.min(ei, PORT.SCORE_MAX.ei);
+      it = Math.min(it, PORT.SCORE_MAX.it);
+      ps = Math.min(ps, PORT.SCORE_MAX.ps);
+      return { total, allShips, ei, it, ps };
+    }
+
+    // ---- ROUND END ----  The single path that closes the round: a FINISH press. Compute
+    // the haul, set pendingAward to the REAL totals, show the color-coded result the rest of
+    // the game uses (a friendly line by haul size, the count shipped, and the three meter
+    // gains, all green), and bring up the RETURN button on it. (The ambient ships sailing
+    // out and back never call this — they are flavor, not an ending.)
+    function endRound() {
+      if (ended) return;
+      ended = true;
+      if (selectedCont) deselectCont(selectedCont); // drop any lifted container so the count is final
+      portFinishMesh.visible = false;
+      hintMesh.visible = false;
+      const a = computeAward();
+      sfxFanfare();                          // a warm, celebratory cue (no fail state)
+      // The friendly line, by how many they shipped correctly. Every tier is positive.
+      let line = PORT.RESULT_WARM;
+      if (a.total >= PORT.HAUL_BIG_AT) line = PORT.RESULT_BIG;
+      else if (a.total >= PORT.HAUL_MID_AT) line = PORT.RESULT_MID;
+      const noun = a.total === 1 ? "container" : "containers";
+      const note = line + "  You shipped " + a.total + " " + noun + " to the right ships.";
+      const changes = [
+        { label: "Economic Impact", delta: a.ei },
+        { label: "Innovation Thinking", delta: a.it },
+        { label: "Problem Solving", delta: a.ps },
+      ];
+      if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
+      resultMesh = makeReadoutCard(changes, note, { widthMeters: PORT.RESULT_W });
+      onTop(resultMesh);
+      resultMesh.position.set(PORT.RESULT_POS[0], PORT.RESULT_POS[1], PORT.RESULT_POS[2]);
+      group.add(resultMesh);
+      // Hand the REAL totals to the shell and bring up the RETURN button on the result. A
+      // fresh press on RETURN (handled in tick) runs the shell's finishStop -> completeStop(
+      // "port", pendingAward) -> the gold check lights and the hub meters get the real Port
+      // contribution, then it fades back to the map.
+      pendingAward = { economic: a.ei, innovation: a.it, problem: a.ps };
+      returnMesh.visible = true;
+      returnMesh.scale.setScalar(1);
+      returnWasPressed = !!returnBtn.hasComponent(Pressed); // showing it must not fire on a carried press
+      console.log("[PORT] round end => award", pendingAward, "from", { ...counts }, "allShips", a.allShips);
     }
 
     let refillIdx = 0;
@@ -4344,16 +4639,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       ct.wasPressed = false;
       if (selectedCont === ct) selectedCont = null;
     }
-    function toSlot(ct: Cont) {            // set a container idle + tappable on its dock slot
-      const sp = PORT.SLOTS[ct.slot];
+    function toSlot(ct: Cont, scaleIn: boolean) { // set a container idle, riding its belt slot
       ct.state = "idle"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
-      ct.mesh.scale.setScalar(1);
+      ct.appearT = scaleIn ? 0 : PORT.ENTER_MS;   // scaleIn => grow back in (a fresh / refilled cube), else already full
       (ct.mesh.material as any).emissiveIntensity = 0;
-      ct.mesh.position.set(sp[0], sp[1], sp[2]);
+      ct.mesh.position.set(slotX(ct.slot), PORT.BELT_Y, PORT.BELT_Z);
+      ct.mesh.scale.setScalar(scaleIn ? 0.001 : 1); // tick recomputes the real scale from slotScale * appear
       ct.mesh.visible = true;
       ct.wasPressed = !!ct.entity.hasComponent(Pressed); // never fire on a carried-over press
     }
-    function startReturn(ct: Cont) {       // ease a wrong ship's container back to its slot
+    function startReturn(ct: Cont) {       // ease a container back to its (moving) belt slot
       const wp = new Vector3(); ct.mesh.getWorldPosition(wp);
       ct.fx = wp.x; ct.fy = wp.y; ct.fz = wp.z;
       ct.t = 0; ct.dur = PORT.RETURN_MS; ct.state = "returning";
@@ -4361,18 +4656,22 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
     // ---- TAP TO SELECT ----  Lift the chosen container and give it the warm gold glow so
     // it clearly stands out. Only one container is ever selected; choosing a new one drops
-    // the old one back to its slot first.
+    // the old one back to the belt first. heldX freezes its x so a lifted cube holds still
+    // (it does not drift along with the belt while you aim).
     function selectCont(ct: Cont) {
       if (selectedCont && selectedCont !== ct) deselectCont(selectedCont);
       selectedCont = ct;
+      ct.heldX = slotX(ct.slot);           // freeze x at the spot it was picked up
       ct.state = "selected";
+      ct.mesh.scale.setScalar(1);          // a picked cube is always full size, clear of the belt-end fade
       (ct.mesh.material as any).emissive.set(PORT.SELECT_GLOW); // warm gold while chosen (lift + glow in tick)
       sfxClick();                          // a soft tap to confirm the pick
     }
-    function deselectCont(ct: Cont) {      // let it go: drop it back onto its slot, glow off
+    function deselectCont(ct: Cont) {      // let it go: ease it back onto the moving belt, glow off
       if (selectedCont === ct) selectedCont = null;
       (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW);  // restore the red the wrong-ship blink uses
-      toSlot(ct);
+      ct.tint = 0;                          // a plain deselect has no red blink
+      startReturn(ct);                      // smooth ease back to its slot (the belt has moved on)
       sfxClick();
     }
 
@@ -4418,17 +4717,60 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
 
     function tick() {
-      // gentle ship bob, the gold "loaded!" pulse easing away, and a faint hover glow so a
-      // ship the ray rests on (while something is selected) reads as a tap target. The
-      // active load pulse owns the glow; the hover glow only shows when the pulse is idle.
+      // Advance the CONVEYOR a little (slow + calm) and scroll the chevron surface to
+      // match, so the belt always reads as quietly running. setInterval-driven, not rAF.
+      const beltAdvance = PORT.BELT_SPEED * (PORT.TICK_MS / 1000);
+      beltOffset = (beltOffset + beltAdvance) % BELT_LEN;
+      chevTex.offset.x -= (beltAdvance * PORT.BELT_CHEVRON_REPEAT) / beltFullLen; // chevrons drift with the belt
+
+      // SHIPS: a gentle bob, then the departure cycle (docked -> sailing out -> a fresh
+      // same-destination ship arriving -> docked). The dock timer only counts during live
+      // play, so nothing sails before Start or after the round ends; an in-progress sail
+      // always finishes smoothly. A ship never departs while a container is inbound to it.
       for (const sh of ships) {
         sh.group.position.y = Math.sin(portClock * 0.001 * Math.PI * 2 * PORT.BOB_HZ + sh.x) * PORT.BOB_AMP;
-        if (sh.pulse > 0) {
-          sh.pulse = Math.max(0, sh.pulse - PORT.PULSE_FALL);
-          (sh.hull.material as any).emissiveIntensity = sh.pulse * 0.7;
-        } else {
-          const hov = !!selectedCont && !flyingCont && !!sh.pad.hasComponent(Hovered);
-          (sh.hull.material as any).emissiveIntensity = hov ? PORT.SHIP_HOVER_GLOW : 0;
+        if (sh.state === "docked") {
+          sh.group.position.z = sh.z;
+          sh.group.scale.setScalar(1);
+          sh.group.visible = true;
+          sh.padMesh.visible = true;                 // loadable while docked
+          if (portStarted && !ended) {
+            const inbound = !!flyingCont && flyingCont.targetShip === sh;
+            sh.dockTimer -= PORT.TICK_MS;
+            if (sh.dockTimer <= 0 && !inbound) {
+              sh.state = "sailing"; sh.sailT = 0; sh.pulse = 0;
+              sh.padMesh.visible = false;
+              sfxShipHorn();                          // a soft horn as she pulls away
+            }
+          }
+          if (sh.pulse > 0) {                         // the gold "loaded!" pulse easing away
+            sh.pulse = Math.max(0, sh.pulse - PORT.PULSE_FALL);
+            (sh.hull.material as any).emissiveIntensity = sh.pulse * 0.7;
+          } else {                                    // else a faint hover glow when aimed at
+            const hov = !!selectedCont && !flyingCont && !!sh.pad.hasComponent(Hovered);
+            (sh.hull.material as any).emissiveIntensity = hov ? PORT.SHIP_HOVER_GLOW : 0;
+          }
+        } else if (sh.state === "sailing") {          // smooth ease-OUT to sea, shrinking away
+          sh.sailT = Math.min(PORT.SAIL_MS, sh.sailT + PORT.TICK_MS);
+          const p = sh.sailT / PORT.SAIL_MS;
+          const e = p * p;                            // ease-in: accelerates away
+          sh.group.position.z = sh.z + (PORT.SAIL_OUT_Z - sh.z) * e;
+          sh.group.scale.setScalar(1 + (PORT.SAIL_OUT_SCALE - 1) * e);
+          (sh.hull.material as any).emissiveIntensity = 0;
+          sh.padMesh.visible = false;
+          if (sh.sailT >= PORT.SAIL_MS) { sh.state = "arriving"; sh.sailT = 0; }
+        } else if (sh.state === "arriving") {         // a fresh ship eases IN to the berth, growing
+          sh.sailT = Math.min(PORT.ARRIVE_MS, sh.sailT + PORT.TICK_MS);
+          const p = sh.sailT / PORT.ARRIVE_MS;
+          const e = 1 - Math.pow(1 - p, 2);           // ease-out: decelerates into the berth
+          sh.group.position.z = PORT.SAIL_OUT_Z + (sh.z - PORT.SAIL_OUT_Z) * e;
+          sh.group.scale.setScalar(PORT.SAIL_OUT_SCALE + (1 - PORT.SAIL_OUT_SCALE) * e);
+          sh.padMesh.visible = false;
+          if (sh.sailT >= PORT.ARRIVE_MS) {
+            sh.state = "docked"; sh.dockTimer = PORT.DOCK_MS;
+            sh.group.position.z = sh.z; sh.group.scale.setScalar(1);
+            sh.padMesh.visible = true;
+          }
         }
       }
       for (const ct of conts) {
@@ -4448,28 +4790,26 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
           continue; // a flying container does nothing else this tick
         }
         if (ct.state === "returning") {
+          // ease back to the container's belt slot, which is itself slowly moving; home to
+          // the slot's CURRENT spot each tick so it lands cleanly on the belt.
           ct.t = Math.min(ct.dur, ct.t + PORT.TICK_MS);
           const k = ct.dur > 0 ? ct.t / ct.dur : 1;
           const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // easeInOut
-          const sp = PORT.SLOTS[ct.slot];
-          ct.mesh.position.set(
-            ct.fx + (sp[0] - ct.fx) * e,
-            ct.fy + (sp[1] - ct.fy) * e,
-            ct.fz + (sp[2] - ct.fz) * e,
-          );
+          const tx = slotX(ct.slot), ty = PORT.BELT_Y, tz = PORT.BELT_Z;
+          ct.mesh.position.set(ct.fx + (tx - ct.fx) * e, ct.fy + (ty - ct.fy) * e, ct.fz + (tz - ct.fz) * e);
+          ct.mesh.scale.setScalar(1); // full size while flying home, clear of the belt-end fade
           if (ct.tint > 0) { // the red "wrong ship" blink fades as it flies home
             ct.tint = Math.max(0, ct.tint - PORT.TINT_FALL);
             (ct.mesh.material as any).emissiveIntensity = ct.tint * 0.85;
           }
-          if (ct.t >= ct.dur) toSlot(ct);
+          if (ct.t >= ct.dur) toSlot(ct, false);
           continue;
         }
         if (ct.state === "selected") {
-          // lift it above its slot with a tiny, calm hover, and breathe the gold glow so it
-          // is unmistakably the chosen one. Nothing flashes (a slow, gentle sine).
-          const sp = PORT.SLOTS[ct.slot];
+          // lift it (held still at heldX, so it does not drift with the belt) with a tiny,
+          // calm hover, and breathe the gold glow so it is unmistakably the chosen one.
           const phase = portClock * 0.001 * Math.PI * 2 * PORT.SELECT_HOVER_HZ;
-          ct.mesh.position.set(sp[0], sp[1] + PORT.SELECT_LIFT + Math.sin(phase) * PORT.SELECT_HOVER_AMP, sp[2]);
+          ct.mesh.position.set(ct.heldX, PORT.BELT_Y + PORT.SELECT_LIFT + Math.sin(phase) * PORT.SELECT_HOVER_AMP, PORT.BELT_Z);
           const g = 0.5 + 0.5 * Math.sin(phase);
           (ct.mesh.material as any).emissiveIntensity =
             PORT.SELECT_GLOW_MIN + (PORT.SELECT_GLOW_MAX - PORT.SELECT_GLOW_MIN) * g;
@@ -4478,25 +4818,42 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         }
         if (ct.state === "loaded" && ct.timer > 0) {
           ct.timer -= PORT.TICK_MS;
-          if (ct.timer <= 0) { recolor(ct, nextRefillColor()); toSlot(ct); }
+          if (ct.timer <= 0) { recolor(ct, nextRefillColor()); toSlot(ct, true); } // a fresh cube rejoins the belt, scaling in
           continue;
         }
         if (ct.state === "idle") {
-          // grow a touch while the ray rests on it, so it reads as tappable (only once play
-          // has started, so nothing looks interactive while the intro is still up).
-          const hov = portStarted && !flyingCont && !!ct.entity.hasComponent(Hovered);
-          ct.mesh.scale.setScalar(hov ? PORT.HOVER_SCALE : 1);
+          // RIDE the belt slot. scale carries the belt-end fade (slotScale: 0 at the ends,
+          // 1 across the reachable middle) and any scale-in (appear), times a gentle hover-
+          // grow while the ray rests on it during live play.
+          if (ct.appearT < PORT.ENTER_MS) ct.appearT = Math.min(PORT.ENTER_MS, ct.appearT + PORT.TICK_MS);
+          const appear = smoothstep(ct.appearT / PORT.ENTER_MS);
+          const sc = slotScale(ct.slot);
+          const hov = portStarted && !ended && sc >= PORT.BELT_TAP_MIN_SCALE && !flyingCont && !!ct.entity.hasComponent(Hovered);
+          ct.mesh.position.set(slotX(ct.slot), PORT.BELT_Y, PORT.BELT_Z);
+          ct.mesh.scale.setScalar(sc * appear * (hov ? PORT.HOVER_SCALE : 1));
         }
       }
 
       // ---- TAP EDGE-DETECTION ----  fire once on a FRESH Pressed edge, the same way the
-      // landmarks and choice cards read a select (a held trigger never re-fires). Gated on
-      // portStarted, so taps do nothing until the student dismisses the intro with Start.
-      // Tapping an idle container selects it; tapping the selected one again deselects it; a
-      // ship sends the selection; empty water (the catcher) deselects. One at a time.
-      if (portStarted) {
+      // landmarks and choice cards read a select (a held trigger never re-fires). Three
+      // states: the intro is up (only Start reacts), live play (containers/ships/catcher +
+      // the FINISH round-ender react), or ended (the result is up, so only the RETURN button
+      // reacts). Tapping an idle container selects it; tapping the selected one again
+      // deselects it; a ship sends the selection; empty water (the catcher) deselects. One
+      // at a time.
+      if (!portStarted) {
+        // Intro is up: a fresh press of the Start button begins play and clears the intro.
+        const hov = !!startBtn.hasComponent(Hovered);
+        const prs = !!startBtn.hasComponent(Pressed);
+        startBtnMesh.scale.setScalar(prs ? VISIT.BTN_PRESS_SCALE : (hov ? VISIT.BTN_HOVER_SCALE : 1));
+        if (prs && !startWasPressed) beginPlay();
+        startWasPressed = prs;
+      } else if (!ended) {
         for (const ct of conts) {
-          const tappable = ct.state === "idle" || ct.state === "selected";
+          // an idle container is only tappable once it has scaled in past the belt ends
+          // (so a barely-there cube at the seam is never the thing you grab); a selected
+          // one is always tappable (tap it again to let it go).
+          const tappable = (ct.state === "idle" && slotScale(ct.slot) >= PORT.BELT_TAP_MIN_SCALE) || ct.state === "selected";
           const prs = tappable && !flyingCont && !!ct.entity.hasComponent(Pressed);
           if (prs && !ct.wasPressed) {
             if (ct.state === "selected") deselectCont(ct); // tap the chosen one again => let it go
@@ -4513,6 +4870,14 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         if (cprs && !catchWasPressed && selectedCont && !flyingCont) deselectCont(selectedCont);
         catchWasPressed = cprs;
 
+        // The FINISH round-ender: gentle grow/squish, and a fresh press (never mid-flight,
+        // so the count is settled) ends the round and shows the result.
+        const fhov = !!portFinishBtn.hasComponent(Hovered);
+        const fprs = !!portFinishBtn.hasComponent(Pressed);
+        portFinishMesh.scale.setScalar(fprs ? VISIT.BTN_PRESS_SCALE : (fhov ? VISIT.BTN_HOVER_SCALE : 1));
+        if (fprs && !portFinishWasPressed && !flyingCont) endRound();
+        portFinishWasPressed = fprs;
+
         // Keep the following hint in step with the state: pick a container, then send it to
         // its match. Reword only when it actually changes, so nothing flashes.
         const want = selectedCont ? "ship" : "pick";
@@ -4521,23 +4886,32 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
           drawHint(want === "ship" ? "Now tap the ship with the same color" : "Tap a container to pick it up");
         }
       } else {
-        // Intro is up: a fresh press of the Start button begins play and clears the intro.
-        const hov = !!startBtn.hasComponent(Hovered);
-        const prs = !!startBtn.hasComponent(Pressed);
-        startBtnMesh.scale.setScalar(prs ? VISIT.BTN_PRESS_SCALE : (hov ? VISIT.BTN_HOVER_SCALE : 1));
-        if (prs && !startWasPressed) beginPlay();
-        startWasPressed = prs;
+        // The result is up: a fresh press of RETURN lands the score (finishStop ->
+        // completeStop with the real pendingAward) and fades back to the map.
+        const rhov = !!returnBtn.hasComponent(Hovered);
+        const rprs = !!returnBtn.hasComponent(Pressed);
+        returnMesh.scale.setScalar(rprs ? VISIT.BTN_PRESS_SCALE : (rhov ? VISIT.BTN_HOVER_SCALE : 1));
+        if (rprs && !returnWasPressed) finishStop();
+        returnWasPressed = rprs;
       }
     }
 
     function start() {
-      portClock = 0; refillIdx = 0;
+      portClock = 0; refillIdx = 0; beltOffset = 0;
       counts.europe = 0; counts.asia = 0; counts.usa = 0;
       drawCounts();
+      ended = false; portFinishWasPressed = false; returnWasPressed = false; // a fresh round, no result yet
+      portFinishMesh.visible = false;            // FINISH appears only once play starts (beginPlay)
+      returnMesh.visible = false;                // RETURN appears only with the result (endRound)
+      if (resultMesh) { group.remove(resultMesh); resultMesh = null; } // clear any prior round's result
       selectedCont = null; flyingCont = null; catchWasPressed = false;
       catchMesh.visible = true;                  // the empty-water deselect catcher is live in the port
-      for (const sh of ships) {
-        sh.pulse = 0; sh.group.position.y = 0; (sh.hull.material as any).emissiveIntensity = 0;
+      for (let i = 0; i < ships.length; i++) {
+        const sh = ships[i];
+        sh.pulse = 0; sh.group.position.set(sh.x, 0, sh.z); sh.group.scale.setScalar(1);
+        sh.group.visible = true; (sh.hull.material as any).emissiveIntensity = 0;
+        sh.state = "docked"; sh.sailT = 0;
+        sh.dockTimer = PORT.DOCK_MS_FIRST + i * PORT.DOCK_STAGGER; // staggered first departures
         sh.padWasPressed = false;
         sh.padMesh.visible = true;               // ship tap-pads are tappable only inside the port
       }
@@ -4546,7 +4920,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         ct.slot = i;
         (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW); // clear any leftover gold selection glow
         recolor(ct, PORT.START_COLORS[i % PORT.START_COLORS.length]);
-        toSlot(ct);
+        toSlot(ct, true);                        // the supply scales in onto the moving belt
       }
       showIntro();                               // greet the student with the directions; Start begins play
     }
@@ -4554,9 +4928,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       for (const ct of conts) park(ct); // hidden + unreachable, so nothing leaks back to the hub
       selectedCont = null; flyingCont = null;
       catchMesh.visible = false;                 // park the catcher so it never blocks the hub
-      for (const sh of ships) { sh.padWasPressed = false; sh.padMesh.visible = false; }
+      for (const sh of ships) {
+        sh.padWasPressed = false; sh.padMesh.visible = false;
+        sh.state = "docked"; sh.group.position.set(sh.x, 0, sh.z); sh.group.scale.setScalar(1); sh.group.visible = true;
+      }
       portStarted = false; startWasPressed = false; // tidy the directions so nothing leaks to the hub
+      ended = false; portFinishWasPressed = false; returnWasPressed = false;
       introPanel.visible = false; startBtnMesh.visible = false; hintMesh.visible = false;
+      portFinishMesh.visible = false; returnMesh.visible = false; // park FINISH + RETURN so nothing leaks to the hub
+      if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
     }
 
     // The game's own loop: bob, eases, refill timers, and release detection. Gated so

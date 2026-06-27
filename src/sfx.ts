@@ -360,3 +360,117 @@ export function stopFarmAmbience() {
   }
   farmHandle = null;
 }
+
+// ----------------------------------------------------------------------------
+// PORT AMBIENCE  —  the harborside counterpart to the other stops' loops: soft
+// lapping water (a low, slowly swelling wash) under a faint warm pad, plus the
+// occasional distant gull. Same approach as startHum/startFarmAmbience: pure
+// WebAudio drones that loop until stopPortAmbience(), so no rAF; the only timer is
+// a slow setInterval that sprinkles in gull cries. Soft and short on purpose (kids
+// in a headset), with a gentle fade in/out so it never pops. The caller starts it
+// on the student's first action in the stop (entering it), by which point the
+// AudioContext is unlocked.
+// ----------------------------------------------------------------------------
+let portHandle: {
+  gain: GainNode;
+  sources: AudioScheduledSourceNode[];
+  gulls: ReturnType<typeof setInterval>;
+} | null = null;
+const PORT_LEVEL = 0.05; // master gain of the whole ambience (very soft)
+
+// A distant gull: two soft, slightly nasal cries that slide DOWN (the gull "mew"),
+// pitch varied each time so it never sounds mechanical. Quiet and short via note().
+function gullCry() {
+  const base = 820 + Math.random() * 360;
+  note(base, 0.16, "sawtooth", 0.03, 0, base * 0.72);          // a down-slurred cry
+  note(base * 0.94, 0.18, "sawtooth", 0.026, 0.2, base * 0.68); // a second, lower
+  if (Math.random() < 0.5) note(base * 0.9, 0.16, "sawtooth", 0.022, 0.42, base * 0.66);
+}
+
+// A soft, low ship horn for a departure: two low tones a fifth apart with a slow,
+// warm swell, kept gentle so it reads as "far across the water," never a blast.
+export function sfxShipHorn() {
+  note(110, 0.7, "triangle", 0.11, 0, 104);   // A2, easing down a touch
+  note(146.83, 0.66, "triangle", 0.07, 0.02); // D3 a fifth up, for body
+  note(73.42, 0.74, "sine", 0.06, 0.03);      // D2 sub, for weight
+}
+
+export function startPortAmbience() {
+  const ctx = getCtx();
+  if (!ctx || portHandle) return; // already running, or no audio
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(PORT_LEVEL, ctx.currentTime + 1.2); // ease in
+  master.connect(ctx.destination);
+
+  const sources: AudioScheduledSourceNode[] = [];
+
+  // Lapping water: looped white noise through a low-pass, kept faint and round (a
+  // lower cutoff than the open-air breeze, so it reads as water against the dock).
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const water = ctx.createBufferSource();
+  water.buffer = buffer;
+  water.loop = true;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 620;
+  const wg = ctx.createGain();
+  wg.gain.value = 0.42;
+  water.connect(lp).connect(wg).connect(master);
+  water.start();
+  sources.push(water);
+
+  // a very slow swell on the water (an LFO on its gain), so the wash gently rises and
+  // falls like small harbor waves. Audio-rate scheduling, not rAF.
+  const lfo = ctx.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.value = 0.09; // very slow wave swell
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.2;
+  lfo.connect(lfoGain).connect(wg.gain);
+  lfo.start();
+  sources.push(lfo);
+
+  // a faint warm pad underneath, so the harbor feels full, not hissy.
+  const pad = ctx.createOscillator();
+  pad.type = "sine";
+  pad.frequency.value = 104; // low and soft
+  const pg = ctx.createGain();
+  pg.gain.value = 0.06;
+  pad.connect(pg).connect(master);
+  pad.start();
+  sources.push(pad);
+
+  // Distant gulls: an occasional soft cry on a slow setInterval (randomized so the
+  // spacing varies). Cleared in stopPortAmbience.
+  const gulls = setInterval(function () {
+    if (Math.random() < 0.4) gullCry();
+  }, 5000);
+
+  portHandle = { gain: master, sources, gulls };
+}
+
+export function stopPortAmbience() {
+  const ctx = getCtx();
+  if (!portHandle || !ctx) return;
+  const { gain, sources, gulls } = portHandle;
+  clearInterval(gulls);
+  const t = ctx.currentTime;
+  try {
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); // ease out
+  } catch {
+    // ignore: context may be closing
+  }
+  for (const s of sources) {
+    try {
+      s.stop(t + 0.7);
+    } catch {
+      // already stopped
+    }
+  }
+  portHandle = null;
+}
