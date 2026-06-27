@@ -36,7 +36,7 @@ import {
 } from "@iwsdk/core";
 
 import { buildBaseWorld, buildShopProps, setStageLook, GUS_SPOT, STATIONS } from "./environment";
-import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard, makeExplorerReportCard } from "./environment";
+import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard, makeExplorerReportCard, makeGoalCard, makeHighlightFrame } from "./environment";
 import { setActiveShop, activeShop, SHOPS, ShopId, ShopPack } from "./shops";
 import { sfxStage, sfxClick, sfxCoin, sfxFanfare, sfxChime, sfxShipHorn, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience, startPortAmbience, stopPortAmbience } from "./sfx";
 
@@ -178,6 +178,70 @@ const STOPS = [
     done: false,
   },
 ];
+
+// ============================================================================
+// MODULE 6 — OPENING ONBOARDING  (the welcome the student gets before the map
+// is explorable). Two blocks: ONBOARD is every tunable position/size/timing for
+// the goal card, Fox's tutorial bubble, the highlight cues, and the three gold
+// buttons; ONBOARD_LINES is all the student-facing words (kept exact). The flow
+// is: a goal card, then Foreman Fox teaches the one control one line at a time
+// (with a real practice tap), then the gate opens. It is fully skippable. All of
+// this drives off setInterval (rAF pauses in the headset) and reuses the same
+// canvas-card + Interactable pointing the rest of the hub uses.
+// ============================================================================
+const ONBOARD = {
+  TICK_MS: 33,
+  // The goal card and the buttons sit in the SAME comfortable zone in front of the
+  // student that the Explorer Report uses (just ahead of the landmark row), so the
+  // opening and the finish feel like one place. Front is +Z, toward the student.
+  GOAL_POS: [0, 1.74, 5.0] as [number, number, number],
+  GOAL_W: 1.95,            // goal card width (m); height follows its canvas
+  // Foreman Fox's tutorial speech bubble, by his head. This REPLACES the old static
+  // welcome bubble, so the student is welcomed exactly once, here.
+  BUBBLE_W: 1.06,          // a touch wider than the old welcome, for the longer lines
+  BUBBLE_Y: 1.95,          // floats just above Fox (his tail points down to him)
+  // The advance button (Start on the goal card, Next on the tutorial) and the small
+  // Skip option. Start and Next share one spot since only one shows at a time.
+  ADVANCE_POS: [0, 0.86, 5.14] as [number, number, number],
+  ADVANCE_W: 1.2, ADVANCE_H: 0.34,
+  SKIP_POS: [1.12, 0.7, 5.08] as [number, number, number],
+  SKIP_W: 0.82, SKIP_H: 0.27,
+  HOVER_SCALE: 1.06, PRESS_SCALE: 0.95,   // button feedback (matches VISIT.BTN_*)
+  // The Fox practice target: an invisible hit box over Fox so the "point at me and
+  // press" practice tap registers, plus how much Fox grows while pointed at.
+  FOX_HIT_W: 0.74, FOX_HIT_H: 1.55, FOX_HIT_D: 0.74, FOX_HIT_Y: 0.78,
+  FOX_HOVER_SCALE: 1.06,
+  // The gold highlight frames Fox points with: one bracketing Fox (step 2), one
+  // ringing the meters panel (step 3). The landmarks (step 4) use their OWN bright
+  // glow via introHighlightLandmarks, so there is one owner of each highlight.
+  FOX_FRAME_W: 0.98, FOX_FRAME_H: 1.72, FOX_FRAME_Y: 0.92, FOX_FRAME_Z_OFF: 0.22,
+  METERS_FRAME_W: 1.36, METERS_FRAME_H: 1.06, METERS_FRAME_BACK: 0.05,
+  // The highlight breathe: a calm sine between these, never a flash.
+  PULSE_MIN: 0.3, PULSE_MAX: 0.72, PULSE_SPEED: 2.4,
+  HALO_COLOR: "#f4c20d",   // house gold, matching the buttons and the visited badge
+};
+
+// Every student-facing word of the opening, kept EXACTLY as written. Fifth-grade,
+// second person, short sentences, no em dashes. tut[1] (index 1) is the practice
+// line: it ends by asking the student to point at Fox and press, and the flow
+// waits for that tap. rest is the calm line Fox is left on once the gate opens.
+const ONBOARD_LINES = {
+  speaker: "Foreman Fox",
+  goalTitle: "Your Virginia Adventure",
+  goalIntro: "Today you will:",
+  goalBullets: [
+    "Explore four real places that drive Virginia's economy today.",
+    "Make smart choices that fill three meters: Economic Impact, Innovation Thinking, and Problem Solving.",
+    "Finish with your own Explorer Report.",
+  ],
+  tut: [
+    "Welcome, explorer! I am Fox, and today you get to explore how Virginia's economy works right now.",
+    "Here is how you do everything in here: point your controller at something, then press to choose it. Try it now, point at me and press.",
+    "Nice! Up here are your three meters: Economic Impact, Innovation Thinking, and Problem Solving. Every good choice fills them up.",
+    "Ahead of you are four places in Virginia to explore. Visit all four, and you will earn your Explorer Report at the end.",
+  ],
+  rest: "That is everything. Point at any place to start exploring. Have fun!",
+};
 
 // ============================================================================
 // MODULE 6 — DECISION PACKS  (the shared grammar the three "lean" stops fill)
@@ -1944,16 +2008,10 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   fox.position.set(foxX, HUB.STAGE_TOP_Y + HUB.FOX_PODIUM_H, HUB.ROW_Z); // standing on his podium
   hubGroup.add(fox); // built facing +z, toward the student
 
-  // --- Fox's welcome, now a speech bubble by his head (its tail points down to
-  // him), so it reads as Fox greeting you rather than a separate sign. Smaller
-  // now that each place carries its own title. Same welcome words. ---
-  const welcomeSign = makeSpeechBubble(
-    "Welcome, Explorer!",
-    "Virginia's economy looks very different today than it used to. Four places on this map show you why. Point at any one to visit it first.",
-    HUB.WELCOME_W,
-  );
-  welcomeSign.position.set(foxX + HUB.WELCOME_DX, HUB.WELCOME_Y, HUB.ROW_Z);
-  hubGroup.add(welcomeSign); // PlaneGeometry faces +z, so it faces the student
+  // --- Fox's welcome is no longer a static bubble here. The student is welcomed
+  // exactly once, by the OPENING ONBOARDING below (the goal card + Fox's tutorial),
+  // which then leaves Fox resting on a calm "point at any place" line. The managed
+  // tutorial speech bubble is built in that section (near Fox, at foxX). ---
 
   // --- One small low-poly landmark per stop, each on its own pedestal ---
   // Each is built diorama scale with its base at y = 0, then enlarged and lifted
@@ -2151,6 +2209,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     hubLandmarks.push({ obj: landmark, baseY: HUB.PED_TOP_Y, stop, glowMats, badge, pad, entity: landmarkEntity, wasPressed: false });
   }
 
+  // When true, the opening onboarding forces all four landmarks into their bright
+  // "pointed at" look at once, so Fox can gesture toward the whole row on his fourth
+  // tutorial line. The bob loop below reads it as one more reason a landmark glows.
+  let introHighlightLandmarks = false;
+
   // One gentle loop drives the bob, the visited state, AND the point-at highlight,
   // so flipping a stop's done flag (or pointing at it) later just works. setInterval,
   // not rAF (rAF pauses in the headset).
@@ -2167,7 +2230,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       // rests on it, Pressed the instant they select. Drives the "this is the
       // target" highlight, layered over whatever the pulse/done look is doing.
       const pointed =
-        lm.entity.hasComponent(Hovered) || lm.entity.hasComponent(Pressed);
+        introHighlightLandmarks || lm.entity.hasComponent(Hovered) || lm.entity.hasComponent(Pressed);
 
       let glow: number;
       if (lm.stop.done) {
@@ -2229,9 +2292,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     PLACEHOLDER_AWARD: { economic: 20, innovation: 20, problem: 20 },
   };
 
-  // The one gate that decides what a point/press does: "hub" (the map reacts),
-  // "fading" (mid-travel, nothing reacts), or "stop" (only Finish reacts).
-  let currentView = "hub";
+  // The one gate that decides what a point/press does: "intro" (the opening
+  // onboarding is running, the map is NOT yet explorable), "hub" (the map reacts),
+  // "fading" (mid-travel, nothing reacts), or "stop" (only Finish reacts). It
+  // starts at "intro" so no landmark can be selected until the onboarding finishes
+  // or is skipped; the onboarding flips it to "hub" to open exploration.
+  let currentView = "intro";
   let activeStopId: string | null = null;
   // The REAL per-stop award handed to completeStop on Finish. A decision-pack stop
   // (the runner) sets this to the student's true tally; a placeholder stop leaves
@@ -5243,6 +5309,223 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     pushHubMeter("innovation", "hub-fill-innovation", "hub-val-innovation");
     pushHubMeter("problem", "hub-fill-problem", "hub-val-problem");
   }, HUB_METERS.TICK_MS);
+
+  // ======================================================================
+  // OPENING ONBOARDING  —  the welcome + one-control tutorial that plays before
+  // the map is explorable. currentView starts at "intro", so the visit loop
+  // ignores every landmark press until this finishes or is skipped (the gate).
+  // The flow, all student paced:
+  //   goal card -> Fox line 1 -> Fox line 2 (PRACTICE: point at Fox + press) ->
+  //   Fox line 3 (highlight the meters) -> Fox line 4 (highlight the row) ->
+  //   gate opens, Fox rests on the calm "point at any place" line.
+  // This folds in the old static welcome (removed up in the hub build), so the
+  // student is welcomed exactly once. A small Skip jumps straight to the open hub
+  // from any step. Built from the SAME canvas cards + Interactable the rest of the
+  // hub uses; every loop is setInterval (rAF pauses in the headset).
+  // ======================================================================
+
+  // ---- Fox's managed tutorial bubble (replaces the old static welcome) ----
+  // One speech bubble by Fox's head whose words we swap per line by rebuilding the
+  // cheap canvas mesh in place. It lives in hubGroup, so it hides under the travel
+  // fade and returns with the map, exactly like the old welcome bubble did.
+  let foxBubbleMesh: Mesh | null = null;
+  function setFoxLine(body: string) {
+    if (foxBubbleMesh) hubGroup.remove(foxBubbleMesh);
+    foxBubbleMesh = makeSpeechBubble(ONBOARD_LINES.speaker, body, ONBOARD.BUBBLE_W);
+    foxBubbleMesh.position.set(foxX + HUB.WELCOME_DX, ONBOARD.BUBBLE_Y, HUB.ROW_Z);
+    hubGroup.add(foxBubbleMesh);
+  }
+
+  // ---- The two gold highlight frames Fox points with ----
+  // A frame is a thick gold border with a clear center, so it brackets a target
+  // without covering it. It is a plain decorative mesh (not Interactable), so it
+  // never blocks the pointing ray, even sitting right in front of a tap target.
+  const foxFrame = makeHighlightFrame(ONBOARD.FOX_FRAME_W, ONBOARD.FOX_FRAME_H, ONBOARD.HALO_COLOR);
+  foxFrame.position.set(foxX, ONBOARD.FOX_FRAME_Y, HUB.ROW_Z + ONBOARD.FOX_FRAME_Z_OFF);
+  (foxFrame.material as any).depthTest = false;
+  (foxFrame.material as any).depthWrite = false;
+  foxFrame.renderOrder = 40000;
+  foxFrame.visible = false;
+  hubGroup.add(foxFrame);
+
+  // The meters frame rings the upper-left meters panel: same position + yaw, pushed
+  // a touch behind it along its facing normal so the panel still reads in front.
+  const metersNormalX = Math.sin(HUB_METERS.YAW);
+  const metersNormalZ = Math.cos(HUB_METERS.YAW);
+  const metersFrame = makeHighlightFrame(ONBOARD.METERS_FRAME_W, ONBOARD.METERS_FRAME_H, ONBOARD.HALO_COLOR);
+  metersFrame.position.set(
+    HUB_METERS.POS[0] - metersNormalX * ONBOARD.METERS_FRAME_BACK,
+    HUB_METERS.POS[1],
+    HUB_METERS.POS[2] - metersNormalZ * ONBOARD.METERS_FRAME_BACK,
+  );
+  metersFrame.rotation.set(0, HUB_METERS.YAW, 0, "YXZ");
+  (metersFrame.material as any).depthTest = false;
+  (metersFrame.material as any).depthWrite = false;
+  metersFrame.renderOrder = 40000;
+  metersFrame.visible = false;
+  hubGroup.add(metersFrame);
+
+  // ---- The Fox practice target ----  An invisible hit box over Fox so "point at
+  // me and press" lands on something. Like the landmark hit boxes, it is a ray
+  // target only; it is watched for a fresh press ONLY during the practice step.
+  const foxHitMesh = meshBox(ONBOARD.FOX_HIT_W, ONBOARD.FOX_HIT_H, ONBOARD.FOX_HIT_D, "#ffffff");
+  (foxHitMesh.material as any).transparent = true;
+  (foxHitMesh.material as any).opacity = 0;
+  (foxHitMesh.material as any).depthWrite = false;
+  foxHitMesh.position.set(foxX, ONBOARD.FOX_HIT_Y, HUB.ROW_Z);
+  const foxHitEntity = world.createTransformEntity(foxHitMesh).addComponent(Interactable);
+  let foxHitWasPressed = false;
+
+  // ---- The goal card + the three gold buttons ----
+  const goalCard = makeGoalCard(
+    ONBOARD_LINES.goalTitle, ONBOARD_LINES.goalIntro, ONBOARD_LINES.goalBullets, ONBOARD.GOAL_W,
+  );
+  goalCard.position.set(ONBOARD.GOAL_POS[0], ONBOARD.GOAL_POS[1], ONBOARD.GOAL_POS[2]);
+  (goalCard.material as any).depthTest = false;
+  (goalCard.material as any).depthWrite = false;
+  goalCard.renderOrder = 49000;
+  goalCard.visible = false;
+  scene.add(goalCard);
+
+  // Each button is a gold pill that always reads over the world, wrapped in the
+  // SAME Interactable the hub uses. Start and Next share one spot (only one shows
+  // at a time). They sit in FRONT of the landmark row, so once the onboarding ends
+  // we move them far out of the way: a hidden Interactable still raycasts, and an
+  // in-front one would otherwise block the now-explorable row. (See
+  // [[iwsdk-hidden-objects-stay-interactive]].)
+  function makeOnboardButton(label: string, pos: [number, number, number], w: number, h: number) {
+    const mesh = makeButtonCard(label, w, h);
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    (mesh.material as any).depthTest = false;
+    (mesh.material as any).depthWrite = false;
+    mesh.renderOrder = 50000;
+    mesh.visible = false;
+    const entity = world.createTransformEntity(mesh).addComponent(Interactable);
+    return { mesh, entity, wasPressed: false };
+  }
+  const obStartBtn = makeOnboardButton("Start", ONBOARD.ADVANCE_POS, ONBOARD.ADVANCE_W, ONBOARD.ADVANCE_H);
+  const obNextBtn = makeOnboardButton("Next", ONBOARD.ADVANCE_POS, ONBOARD.ADVANCE_W, ONBOARD.ADVANCE_H);
+  const obSkipBtn = makeOnboardButton("Skip intro", ONBOARD.SKIP_POS, ONBOARD.SKIP_W, ONBOARD.SKIP_H);
+
+  // ---- The onboarding state machine ----
+  // "goal" | 1..4 | "done". showStep paints one beat; finishOnboarding opens the
+  // gate; startOnboarding shows the goal card. Only ever moves forward.
+  let onboardStep: "goal" | number | "done" = "goal";
+
+  function showStep(s: "goal" | number) {
+    onboardStep = s;
+    const isGoal = s === "goal";
+    goalCard.visible = isGoal;
+    if (!isGoal) setFoxLine(ONBOARD_LINES.tut[(s as number) - 1]); // lines 1..4
+    // Advance button: "Start" on the goal card; "Next" on lines 1, 3, 4. Line 2 is
+    // the practice tap, so it shows no Next: the student advances by tapping Fox.
+    obStartBtn.mesh.visible = isGoal;
+    obNextBtn.mesh.visible = s === 1 || s === 3 || s === 4;
+    obSkipBtn.mesh.visible = true;          // skippable from the goal card and every line
+    // Highlights, one owner each: a frame on Fox (2), a frame on the meters (3), the
+    // whole landmark row lit at once (4) via the bob loop's introHighlightLandmarks.
+    foxFrame.visible = s === 2;
+    metersFrame.visible = s === 3;
+    introHighlightLandmarks = s === 4;
+    if (s !== 2) fox.scale.setScalar(1);    // drop any practice-hover grow
+  }
+
+  function finishOnboarding() {
+    onboardStep = "done";
+    goalCard.visible = false;
+    foxFrame.visible = false;
+    metersFrame.visible = false;
+    introHighlightLandmarks = false;
+    fox.scale.setScalar(1);
+    // Park every onboarding button far out of the ray path (hiding alone is not
+    // enough: a hidden Interactable still raycasts, and these sit in front of the
+    // now-explorable row). The Fox practice target goes with them.
+    for (const b of [obStartBtn, obNextBtn, obSkipBtn]) {
+      b.mesh.visible = false;
+      b.mesh.position.set(0, -1000, 0);
+    }
+    foxHitMesh.position.set(0, -1000, 0);
+    setFoxLine(ONBOARD_LINES.rest);         // Fox rests on the calm "point at any place" line
+    currentView = "hub";                    // OPEN THE GATE: the map is now explorable
+    sfxStage();                             // a soft "you're in" cue
+  }
+
+  function startOnboarding() {
+    showStep("goal");
+  }
+
+  // One loop services the goal/tutorial: breathe the active highlight frame, give
+  // each visible button hover-grow / press-squish and fire it once, and watch for
+  // the practice tap on Fox during step 2. Gated entirely on onboardStep; once
+  // "done" it idles. setInterval, not rAF (rAF pauses in the headset).
+  function serviceOnboardButton(
+    b: { mesh: Mesh; entity: any; wasPressed: boolean },
+    active: boolean,
+    onPress: () => void,
+  ) {
+    if (!active) {
+      b.mesh.scale.setScalar(1);
+      b.wasPressed = !!b.entity.hasComponent(Pressed); // swallow stray presses while hidden
+      return;
+    }
+    const hov = !!b.entity.hasComponent(Hovered);
+    const prs = !!b.entity.hasComponent(Pressed);
+    b.mesh.scale.setScalar(prs ? ONBOARD.PRESS_SCALE : hov ? ONBOARD.HOVER_SCALE : 1);
+    if (prs && !b.wasPressed) onPress();
+    b.wasPressed = prs;
+  }
+
+  let onbT = 0;
+  setInterval(function () {
+    if (onboardStep === "done") return;
+    onbT += ONBOARD.TICK_MS / 1000;
+
+    // Breathe whichever highlight frame is up (a calm sine, never a flash).
+    const t = 0.5 + 0.5 * Math.sin(onbT * ONBOARD.PULSE_SPEED);
+    const pulse = ONBOARD.PULSE_MIN + (ONBOARD.PULSE_MAX - ONBOARD.PULSE_MIN) * t;
+    if (foxFrame.visible) (foxFrame.material as any).opacity = pulse;
+    if (metersFrame.visible) (metersFrame.material as any).opacity = pulse;
+
+    // Start (goal card) -> first tutorial line.
+    serviceOnboardButton(obStartBtn, onboardStep === "goal", function () {
+      sfxClick();
+      showStep(1);
+    });
+    // Next (lines 1, 3, 4) -> the next beat, or finish after line 4.
+    const nextActive = onboardStep === 1 || onboardStep === 3 || onboardStep === 4;
+    serviceOnboardButton(obNextBtn, nextActive, function () {
+      sfxClick();
+      if (onboardStep === 1) showStep(2);
+      else if (onboardStep === 3) showStep(4);
+      else finishOnboarding();              // after line 4
+    });
+    // Skip -> straight to the open hub. Always live here (we already returned if
+    // "done"), so the student can leave the goal card or any line at once.
+    serviceOnboardButton(obSkipBtn, true, function () {
+      sfxClick();
+      finishOnboarding();
+    });
+
+    // The practice tap (line 2): Fox grows while pointed at, and a fresh press on
+    // him advances to line 3. On every other step we just keep his latch in sync so
+    // a stray press never counts.
+    if (onboardStep === 2) {
+      const hov = !!foxHitEntity.hasComponent(Hovered);
+      fox.scale.setScalar(hov ? ONBOARD.FOX_HOVER_SCALE : 1);
+      const prs = !!foxHitEntity.hasComponent(Pressed);
+      if (prs && !foxHitWasPressed) {
+        sfxChime();                         // a happy "you did it" cue
+        showStep(3);
+      }
+      foxHitWasPressed = prs;
+    } else {
+      foxHitWasPressed = !!foxHitEntity.hasComponent(Pressed);
+    }
+  }, ONBOARD.TICK_MS);
+
+  // Kick off the opening: show the goal card. Everything else is parked hidden
+  // until its step, and currentView is already "intro", so the map stays locked.
+  startOnboarding();
 
   // ======================================================================
   // EXPLORER REPORT  —  the finish of the Virginia tour. Once the student has

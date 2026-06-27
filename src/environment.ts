@@ -568,6 +568,118 @@ export function makeInfoCard(eyebrow: string, body: string, widthMeters = 2.3): 
   );
 }
 
+// The OPENING GOAL CARD: a tall parchment card with a bold title, one intro line,
+// and a short list of gold-dot bullets (left aligned, wrapped, hung under the dot).
+// The canvas height is sized to the content so there is no empty band of sky under
+// the words. Baked on a canvas so it shows in the headset AND on the laptop. Used
+// once, at the very start, to tell the student what the adventure is. Front is +Z.
+export function makeGoalCard(
+  title: string,
+  intro: string,
+  bullets: string[],
+  widthMeters = 1.95,
+): Mesh {
+  const W = 1024;
+  const padX = 74;          // left/right inner margin for the bullet text
+  const dotGap = 56;        // how far the wrapped text hangs past the gold dot
+  const textW = W - padX * 2 - dotGap;
+
+  // Font sizes and line heights for the three bands.
+  const TITLE_F = 70, TITLE_LH = 82;
+  const INTRO_F = 46, INTRO_LH = 58;
+  const BULLET_F = 40, BULLET_LH = 50, BULLET_GAP = 20;
+  const topPad = 48, afterTitle = 26, afterIntro = 28, botPad = 46;
+
+  // Measure the bullets first (on a throwaway context) so we can size the canvas.
+  const tmp = document.createElement("canvas").getContext("2d") as CanvasRenderingContext2D;
+  tmp.font = BULLET_F + "px sans-serif";
+  const wrapped = bullets.map(function (b) { return wrapLines(tmp, b, textW); });
+  let h = topPad + TITLE_LH + afterTitle + INTRO_LH + afterIntro;
+  for (const lines of wrapped) h += lines.length * BULLET_LH + BULLET_GAP;
+  h += botPad;
+  const H = Math.round(h);
+
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // Parchment card with a warm gold border (matches the other cards).
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 40);
+  ctx.fill();
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 8, 8, W - 16, H - 16, 40);
+  ctx.stroke();
+
+  ctx.textBaseline = "top";
+  let y = topPad;
+
+  // Title, large and dark, centered.
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#5b3a24";
+  ctx.font = "bold " + TITLE_F + "px sans-serif";
+  ctx.fillText(title, W / 2, y);
+  y += TITLE_LH + afterTitle;
+
+  // Intro line ("Today you will:"), centered.
+  ctx.fillStyle = "#3a3326";
+  ctx.font = "bold " + INTRO_F + "px sans-serif";
+  ctx.fillText(intro, W / 2, y);
+  y += INTRO_LH + afterIntro;
+
+  // Bullets, left aligned, each with a gold dot and its wrapped lines hung past it.
+  ctx.textAlign = "left";
+  ctx.font = BULLET_F + "px sans-serif";
+  const textX = padX + dotGap;
+  for (const lines of wrapped) {
+    ctx.fillStyle = "#caa24a";
+    ctx.beginPath();
+    ctx.arc(padX + 12, y + BULLET_F * 0.5, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#3a3326";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], textX, y);
+      y += BULLET_LH;
+    }
+    y += BULLET_GAP;
+  }
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
+// A HIGHLIGHT FRAME: a thick rounded gold border with a fully transparent center,
+// so it rings a target (Foreman Fox, the meters panel) without covering it. Front
+// is +Z; the onboarding loop pulses its material opacity so it breathes (never a
+// flash). Because it is a plain decorative mesh, not an Interactable entity, it
+// never intercepts the pointing ray, so it can sit right in front of a tap target.
+export function makeHighlightFrame(widthMeters: number, heightMeters: number, color = "#f4c20d"): Mesh {
+  const W = 512;
+  const H = Math.max(96, Math.round((W * heightMeters) / widthMeters));
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+  const inset = 28;
+  ctx.lineWidth = 34;
+  ctx.strokeStyle = color;
+  tracePanel(ctx, inset, inset, W - inset * 2, H - inset * 2, 44);
+  ctx.stroke();
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
 // The polished VISIBLE-CONSEQUENCES readout, reusing Module 8's look exactly: each
 // meter that moved shows as a bold line "Label   +N", GREEN for a gain and RED for
 // a drop, and a meter that did not change is left out entirely (just as Module 8's
