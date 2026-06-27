@@ -5244,6 +5244,151 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     pushHubMeter("problem", "hub-fill-problem", "hub-val-problem");
   }, HUB_METERS.TICK_MS);
 
+  // ======================================================================
+  // EXPLORER REPORT  —  the finish. Once the student has actually FINISHED all
+  // four stops (every STOPS.done true, so all four gold checks are lit), Foreman
+  // Fox offers a "See your Explorer Report" button at the hub. Pressing it opens
+  // the project's existing report card (ui/report.json) filled with the REAL
+  // running totals (m6Totals, the SAME numbers the hub meters show), and a
+  // "Return to the map" button takes the student back, so the report is never a
+  // dead end and they can revisit a stop. The report is NEVER forced: the offer
+  // appears only when all four are done, and only a press opens it. We reskin and
+  // theme the report's words/colors in the NEXT prompt; this prompt only wires
+  // finishing all four to open it.
+  //
+  // Nothing here touches the four stops, the visit loop, the hub meters, or the
+  // gold checks. Every loop is setInterval (rAF pauses in the headset). The
+  // [[iwsdk-hidden-objects-stay-interactive]] rule applies: a hidden Interactable
+  // is still clickable, so each button's PRESS is gated on the same conditions
+  // that show it, not on .visible alone.
+  // ======================================================================
+  const REPORT = {
+    // The "See your Explorer Report" offer: a clear banner floating ABOVE the
+    // landmark row (just over the title cards, under the YOUR PROGRESS meters), so
+    // the whole label is on screen, it covers none of the gold checks, and it
+    // blocks no landmark (the row stays pointable for a revisit). Nudged toward
+    // Fox's side and angled to the student. Tunable; collides with nothing.
+    SEE_POS: [-0.3, 2.22, 4.6] as [number, number, number],
+    SEE_YAW: 0.15,         // radians; a slight turn toward the centered student
+    SEE_W: 1.7,            // button width (metres)
+    SEE_H: 0.42,           // button height (metres)
+    // The report card: centered in front of the student at comfortable kid reading
+    // height, just ahead of the landmark row so it reads as the finale.
+    PANEL_POS: [0, 1.8, 5.0] as [number, number, number],
+    PANEL_W: 1.9,          // report panel bounding width (metres)
+    PANEL_H: 1.4,          // report panel bounding height (metres)
+    // The "Return to the map" button, centered just below the report card.
+    RETURN_POS: [0, 0.88, 5.12] as [number, number, number],
+    RETURN_W: 1.6,         // button width (metres)
+    RETURN_H: 0.4,         // button height (metres)
+    TRACK: 40,             // must match the .bar-bg width in ui/report.uikitml
+    HOVER_SCALE: 1.06,     // gentle grow while pointed at (matches VISIT.BTN_*)
+    PRESS_SCALE: 0.95,     // quick squish on press
+    TICK_MS: 33,           // loop rate (rAF pauses in the headset)
+  };
+
+  // A gold button that always reads over the world, wrapped in a ray-target entity
+  // (the SAME Interactable the hub landmarks use), parked at a position + yaw, and
+  // hidden until the finish loop shows it.
+  function makeReportButton(label: string, pos: [number, number, number], yaw: number, w: number, h: number) {
+    const mesh = makeButtonCard(label, w, h);
+    (mesh.material as any).depthTest = false;  // always readable over the sky / hub
+    (mesh.material as any).depthWrite = false;
+    mesh.renderOrder = 50000;
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    mesh.rotation.set(0, yaw, 0, "YXZ");
+    mesh.visible = false;
+    const entity = world.createTransformEntity(mesh).addComponent(Interactable);
+    return { mesh, entity };
+  }
+  const seeReportBtn = makeReportButton("See your Explorer Report", REPORT.SEE_POS, REPORT.SEE_YAW, REPORT.SEE_W, REPORT.SEE_H);
+  const reportReturnBtn = makeReportButton("Return to the map", REPORT.RETURN_POS, 0, REPORT.RETURN_W, REPORT.RETURN_H);
+
+  // The report card itself: the project's EXISTING report markup (ui/report.json),
+  // reused unchanged so its element ids keep working. Built like the hub-meters panel.
+  const m6ReportPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/report.json", maxWidth: REPORT.PANEL_W, maxHeight: REPORT.PANEL_H });
+  m6ReportPanel.object3D!.position.set(REPORT.PANEL_POS[0], REPORT.PANEL_POS[1], REPORT.PANEL_POS[2]);
+  m6ReportPanel.object3D!.visible = false;
+  let m6ReportDoc: any = null;
+  whenPanelReady(m6ReportPanel, function (doc) { m6ReportDoc = doc; });
+
+  // Fill the report's three meters from the live running totals. The report bars map
+  // to the SAME colors as the hub meters: growth = coral = Economic Impact, security
+  // = green = Innovation Thinking, smarts = blue = Problem Solving. The labels/title
+  // are still the project's originals (the next prompt reskins them); we only fill
+  // the numbers + bars and a friendly greeting so no raw "..." placeholder shows.
+  function fillReport() {
+    if (!m6ReportDoc) return;
+    const setMeter = function (fillId: string, valId: string, val: number) {
+      m6ReportDoc.getElementById(valId)?.setProperties({ text: String(Math.round(val)) });
+      m6ReportDoc.getElementById(fillId)?.setProperties({ width: (REPORT.TRACK * val) / 100 });
+    };
+    setMeter("fill-growth", "value-growth", m6Totals.economic);
+    setMeter("fill-security", "value-security", m6Totals.innovation);
+    setMeter("fill-smarts", "value-smarts", m6Totals.problem);
+    m6ReportDoc.getElementById("greeting")?.setProperties({ text: "Great work, Explorer!" });
+    m6ReportDoc.getElementById("personality-name")?.setProperties({ text: "" });
+    m6ReportDoc.getElementById("personality-blurb")?.setProperties({ text: "" });
+  }
+
+  let reportOpen = false;
+  let seeReportWasPressed = false;
+  let returnToMapWasPressed = false;
+  function openReport() {
+    fillReport();
+    reportOpen = true;
+    sfxChime();   // a warm, gentle reveal cue
+    console.log("[M6] explorer report opened => totals", m6Totals);
+  }
+  function closeReport() {
+    reportOpen = false;
+    sfxClick();
+  }
+
+  // The one loop that runs the finish: offer the report once all four are done, open
+  // it on a fresh press, and bring the student back on Return. Visibility AND
+  // press-handling share the same gate (hidden Interactables stay clickable), so a
+  // button never fires while it is not really being offered.
+  setInterval(function () {
+    const allDone = STOPS.every(function (s) { return s.done; });
+    const onMap = hubGroup.visible && currentView === "hub";
+    // If a visit somehow starts while the report is up (e.g. the student points at a
+    // landmark to revisit it), drop the overlay so it cannot bleed into the stop.
+    if (reportOpen && !onMap) reportOpen = false;
+
+    // --- The offer: only on the map, only once all four stops are finished, and
+    // only while the report is not already open. ---
+    const showSee = allDone && onMap && !reportOpen;
+    seeReportBtn.mesh.visible = showSee;
+    if (showSee) {
+      const hov = !!seeReportBtn.entity.hasComponent(Hovered);
+      const prs = !!seeReportBtn.entity.hasComponent(Pressed);
+      seeReportBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
+      if (prs && !seeReportWasPressed) openReport();
+      seeReportWasPressed = prs;
+    } else {
+      seeReportBtn.mesh.scale.setScalar(1);
+      seeReportWasPressed = !!seeReportBtn.entity.hasComponent(Pressed); // swallow a carried press so it cannot fire on reveal
+    }
+
+    // --- The report card + its "Return to the map" button, shown together. ---
+    const reportUp = reportOpen && onMap;
+    if (m6ReportPanel.object3D) m6ReportPanel.object3D.visible = reportUp;
+    reportReturnBtn.mesh.visible = reportUp;
+    if (reportUp) {
+      const hov = !!reportReturnBtn.entity.hasComponent(Hovered);
+      const prs = !!reportReturnBtn.entity.hasComponent(Pressed);
+      reportReturnBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
+      if (prs && !returnToMapWasPressed) closeReport();
+      returnToMapWasPressed = prs;
+    } else {
+      reportReturnBtn.mesh.scale.setScalar(1);
+      returnToMapWasPressed = !!reportReturnBtn.entity.hasComponent(Pressed);
+    }
+  }, REPORT.TICK_MS);
+
   // Start the flow at Setup.
   // ==========================================================================
   // OPENING PANELS  —  title -> how to play -> into Main Street.
