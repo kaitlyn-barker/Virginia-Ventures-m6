@@ -691,17 +691,45 @@ export function makeHighlightFrame(widthMeters: number, heightMeters: number, co
 export function makeReadoutCard(
   changes: { label: string; delta: number }[],
   note: string,
-  opts: { upColor?: string; downColor?: string; widthMeters?: number } = {},
+  opts: { upColor?: string; downColor?: string; widthMeters?: number; subNote?: string } = {},
 ): Mesh {
   const upColor = opts.upColor ?? "#2e7d32";     // Module 8 DELTA_UP (green gain)
   const downColor = opts.downColor ?? "#b23a2e"; // Module 8 DELTA_DOWN (red drop)
   const widthMeters = opts.widthMeters ?? 2.3;
+  const subNote = opts.subNote;                  // optional smaller "why" framing under the note
   const W = 1024;
-  const H = 540;
   const c = document.createElement("canvas");
   c.width = W;
-  c.height = H;
+  c.height = 540;                                // provisional; finalized once the content is measured
   const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  // Only the meters that actually moved (unchanged ones are left out, like Module 8).
+  const moved = changes.filter(function (m) { return m.delta !== 0; });
+
+  // Block sizes, measured up front so the whole readout can be vertically centered
+  // on the card no matter how many change lines or note lines it ends up with.
+  const EYE = 30, EYE_GAP = 26;
+  const CH = 50, CH_LH = 64;
+  const NT = 40, NT_LH = 52, NT_GAP = 30;
+  const SUB = 28, SUB_LH = 38, SUB_GAP = 26;     // the smaller, calmer "why" framing
+  ctx.font = NT + "px sans-serif";
+  const noteLines = wrapLines(ctx, note, W - 150);
+  // The optional sub-note honors explicit line breaks, then wraps each part to fit.
+  const subLines: string[] = [];
+  if (subNote) {
+    ctx.font = SUB + "px sans-serif";
+    for (const part of subNote.split("\n")) {
+      for (const ln of wrapLines(ctx, part, W - 150)) subLines.push(ln);
+    }
+  }
+
+  const changeCount = moved.length || 1;
+  let totalH = EYE + EYE_GAP + changeCount * CH_LH + NT_GAP + noteLines.length * NT_LH;
+  if (subNote) totalH += SUB_GAP + subLines.length * SUB_LH;
+  // No sub-note => the classic 540 canvas, byte-for-byte (the decision stops rely on it).
+  // With a sub-note, grow only as much as the extra lines need, with comfortable margins.
+  const H = subNote ? Math.max(540, totalH + 96) : 540;
+  if (c.height !== H) c.height = H;              // resizing the canvas clears it + resets ctx state
 
   // Parchment card with a warm gold border (the shared panel look).
   ctx.fillStyle = "#fbf3dd";
@@ -715,18 +743,6 @@ export function makeReadoutCard(
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
 
-  // Only the meters that actually moved (unchanged ones are left out, like Module 8).
-  const moved = changes.filter(function (m) { return m.delta !== 0; });
-
-  // Block sizes, measured up front so the whole readout can be vertically centered
-  // on the card no matter how many change lines or note lines it ends up with.
-  const EYE = 30, EYE_GAP = 26;
-  const CH = 50, CH_LH = 64;
-  const NT = 40, NT_LH = 52, NT_GAP = 30;
-  ctx.font = NT + "px sans-serif";
-  const noteLines = wrapLines(ctx, note, W - 150);
-  const changeCount = moved.length || 1;
-  const totalH = EYE + EYE_GAP + changeCount * CH_LH + NT_GAP + noteLines.length * NT_LH;
   let y = Math.max(40, (H - totalH) / 2);
 
   // A small gold eyebrow, echoing Module 8's result eyebrow.
@@ -756,6 +772,25 @@ export function makeReadoutCard(
   for (const ln of noteLines) {
     ctx.fillText(ln, W / 2, y);
     y += NT_LH;
+  }
+
+  // The optional sub-note: a smaller, muted "why the meters grew" block, set off by a thin
+  // gold rule so it reads as a calm footnote under the gains, never shouting.
+  if (subNote) {
+    y += SUB_GAP - 16;
+    ctx.strokeStyle = "#e3cf9b";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - 250, y);
+    ctx.lineTo(W / 2 + 250, y);
+    ctx.stroke();
+    y += 18;
+    ctx.fillStyle = "#4a4030";
+    ctx.font = SUB + "px sans-serif";
+    for (const ln of subLines) {
+      ctx.fillText(ln, W / 2, y);
+      y += SUB_LH;
+    }
   }
 
   const tex = new CanvasTexture(c);

@@ -911,11 +911,12 @@ const FARM_VALLEY = {
 
 // ============================================================================
 // PORT OF VIRGINIA  —  the signature stop's custom container-loading game (NOT a
-// decision pack). Three docked ships, each a destination + color; a dock shelf of
-// color-coded containers the student grabs (distance grab, the same ray they
-// already point with) and releases onto the matching ship. A correct ship loads
-// it with a happy cue; the wrong ship gently refuses and the container drifts
-// back to the dock. No choice ever fails. All positions are WORLD coordinates
+// decision pack). It is a real trade lesson: three docked ships, each a MARKET
+// (Europe / Asia / United States); a conveyor of Virginia PRODUCTS the student taps
+// and sends to the ship for the market that buys it. A correct market loads it with a
+// happy cue; the wrong market gently refuses and the product flies back, no penalty.
+// Each ship also wears a "wants" sign, and each product keeps its market's backup
+// color, so the student can match by reasoning or by color. No choice ever fails. All positions are WORLD coordinates
 // (the student spawns near z = +7 and looks toward -z, so smaller z is farther
 // out over the water). The game reads ONLY this block. Scoring (correct loads -> the
 // three meters + result), a slow MOVING CONVEYOR supply, and ambient SHIP DEPARTURES
@@ -923,25 +924,55 @@ const FARM_VALLEY = {
 // ============================================================================
 const PORT = {
   TICK_MS: 33,                 // every port loop runs on setInterval (rAF pauses in headset)
-  // ---- the three ships: a row across the dock on a gentle arc, each carrying a
-  // destination and a color. key drives BOTH the ship color and the matching
-  // container color, so the two can never drift apart.
+  // ---- the three ships: a row across the dock on a gentle arc. key is the MARKET the
+  // ship sails to; color is that market's color, shared with the backup color of every
+  // PRODUCT bound for it (see PRODUCTS below), so a color match still lines up. wants is
+  // the short sign on the ship telling the student which products that market buys, so
+  // the student can reason out the match instead of only matching colors.
   SHIPS: [
-    { key: "europe", label: "EUROPE",        color: "#2f7fd0", pos: [-1.7, 0.0, 4.35] }, // blue
-    { key: "asia",   label: "ASIA",          color: "#d23b30", pos: [ 0.0, 0.0, 4.0 ] }, // red
-    { key: "usa",    label: "UNITED STATES", color: "#3fa64a", pos: [ 1.7, 0.0, 4.35] }, // green
-  ] as { key: string; label: string; color: string; pos: [number, number, number] }[],
+    { key: "europe", label: "EUROPE",        color: "#2f7fd0", wants: "Europe buys: Machines, Lumber",      pos: [-1.7, 0.0, 4.35] }, // blue
+    { key: "asia",   label: "ASIA",          color: "#d23b30", wants: "Asia buys: Soybeans, Coal",          pos: [ 0.0, 0.0, 4.0 ] }, // red
+    { key: "usa",    label: "UNITED STATES", color: "#3fa64a", wants: "Stays in the USA: Chicken, Seafood",  pos: [ 1.7, 0.0, 4.35] }, // green
+  ] as { key: string; label: string; color: string; wants: string; pos: [number, number, number] }[],
+  // ---- the six Virginia PRODUCTS the student loads, each onto the ship for the MARKET
+  // that buys it. color is a backup equal to that market's ship color, so a student who
+  // cannot read the labels yet can still match by color. The PRODUCT decides the match
+  // (correct when its market is the ship's market), NOT the color. icon names the simple
+  // shape drawn on the container face beside the product name.
+  PRODUCTS: [
+    { name: "Soybeans", market: "asia",   color: "#d23b30", icon: "soybeans" }, // red, to Asia
+    { name: "Coal",     market: "asia",   color: "#d23b30", icon: "coal" },     // red, to Asia
+    { name: "Machines", market: "europe", color: "#2f7fd0", icon: "gear" },     // blue, to Europe
+    { name: "Lumber",   market: "europe", color: "#2f7fd0", icon: "lumber" },   // blue, to Europe
+    { name: "Chicken",  market: "usa",    color: "#3fa64a", icon: "chicken" },  // green, stays in the USA
+    { name: "Seafood",  market: "usa",    color: "#3fa64a", icon: "fish" },     // green, stays in the USA
+  ] as { name: string; market: string; color: string; icon: string }[],
+  // ---- the teaching layer: a one-line WHY-FACT shown briefly on each CORRECT load, so the
+  // student learns from the trade, not just sorts it. Keyed by product name; fifth-grade
+  // voice, one short sentence each. Shown on the calm fact card (FACT_* below), then faded.
+  WHY_FACT: {
+    Soybeans: "Virginia grows lots of soybeans, and Asia is the biggest buyer.",
+    Coal:     "Coal is Virginia's number one export, shipped across the ocean to Asia.",
+    Machines: "Virginia factories build machines that Europe buys.",
+    Lumber:   "Virginia's forests give us wood that Europe buys.",
+    Chicken:  "Virginia chicken is trucked to families in other US states.",
+    Seafood:  "Virginia's coast brings in seafood for restaurants across the USA.",
+  } as Record<string, string>,
   SHIP_HULL_W: 1.5, SHIP_HULL_H: 0.55, SHIP_HULL_D: 0.95,  // low-poly hull box
   DECK_Y: 0.72,                // world y of the deck top (where a loaded box would sit)
   WATER_Y: 0.05,              // harbor water top (the ships sit in it)
   BOB_HZ: 0.16, BOB_AMP: 0.03, // a very gentle ship bob (slow; nothing lurches)
   PULSE_FALL: 0.06,            // how fast the "loaded!" gold glow on a ship eases away
-  // ---- the clickable ship target: a generous, invisible hit-pad around each ship the
-  // student taps to send the selected container. Kept SHORT (its top sits below the ray
-  // to the Finish button, which lines up directly behind the green ship) so aiming at a
-  // ship never steals a Finish press. Wider than the hull so a kid's aim lands easily.
-  PAD_W: 1.5, PAD_H: 0.9, PAD_D: 1.05,  // hit-pad size (m); short on purpose (see above)
-  PAD_Y: 0.4,                           // hit-pad center height; top ~0.85 stays under the Finish ray
+  // ---- the clickable ship target: ONE generous, invisible hit-pad that wraps the WHOLE
+  // ship (base, hull, name tag, mast, and flag), so a tap on ANY part of the ship sends the
+  // selected container there. It is a fully transparent box (opacity 0), never a hidden mesh,
+  // so it always registers a tap. The pad is a live ray target ONLY while the student is
+  // holding a container (see the gating in tick): the rest of the time it leaves the ray set
+  // entirely, so an idle aim passes straight THROUGH it to the Finish button that lines up
+  // just behind the green berth. That gating is why the pad can now stand full height without
+  // ever stealing a Finish press, so it no longer has to be kept short.
+  PAD_W: 1.6, PAD_H: 1.7, PAD_D: 1.05,  // hit-pad size (m): a touch wider than the hull, tall enough to cover the flag (no neighbor overlap, ships are 1.7 apart)
+  PAD_Y: 0.8,                           // hit-pad center height; spans ~[-0.05, 1.65], the waterline up past the flag + mast top
   SHIP_HOVER_GLOW: 0.28,                // faint gold on a ship while the ray rests on it
   // ---- the moving CONVEYOR supply ----  Containers ride a slow LEFT->RIGHT belt into
   // the student's reach and are tapped there. Spacing is guaranteed by N fixed belt
@@ -951,15 +982,20 @@ const PORT = {
   // travel is the only constant supply motion and is slow + calm. Driven on setInterval.
   CONTAINER: 0.34,            // container cube size (m)
   BELT_N: 5,                  // containers riding the belt at once (the moving "slots")
-  BELT_X_MIN: -2.3, BELT_X_MAX: 2.3, // belt span in x; the whole run sits in easy reach
+  // belt span in x; the whole run sits in easy reach AND inside the forward view. The
+  // belt is close (BELT_Z below), so a wide span would push the end containers past a
+  // laptop's screen edges; kept to +-1.5 so every tappable container is in view without
+  // a camera drag (the seam ends, where a container has scaled to ~0, may sit at the
+  // very edge but are never tappable there anyway).
+  BELT_X_MIN: -1.4, BELT_X_MAX: 1.4,
   BELT_Y: 1.0,               // container center height riding the belt
   BELT_Z: 5.6,               // belt depth: the reach line, just ahead of the spawn
   BELT_SPEED: 0.26,          // belt travel speed (m/s) — slow and calm
   BELT_SEAM_FRAC: 0.16,      // fraction of the belt at EACH end where a container scales 0<->1 (hides the wrap)
   BELT_TAP_MIN_SCALE: 0.82,  // a container is only tappable once it has scaled in past this (clear of the ends)
   ENTER_MS: 300,             // a refilled / returned container scales back in over this, so it never pops
-  START_COLORS: ["europe", "asia", "usa", "asia", "europe"], // a spread of all three to begin
-  REFILL_CYCLE: ["usa", "europe", "asia"],                   // a loaded container comes back in this color, cycling
+  START_PRODUCTS: ["Machines", "Soybeans", "Chicken", "Coal", "Lumber"],          // the belt opens with a spread across all three markets
+  REFILL_PRODUCTS: ["Seafood", "Machines", "Soybeans", "Chicken", "Lumber", "Coal"], // a loaded slot refills with the next product here, cycling through all six
   PARK_Y: -100,              // a loaded container parks far below the world: invisible AND out of any aim
   // ---- the belt STRUCTURE (drawn in buildPortGame): a dark bed with a scrolling
   // chevron surface, two side rails, end rollers, and legs down to the dock. ----
@@ -1021,7 +1057,10 @@ const PORT = {
   // ---- the live SHIPPED manifest (per-ship counts + a running total) ----
   // Friendly in-play feedback so the student sees their haul grow; the final tally
   // also drives the result panel + the three-meter award below.
-  DEBUG_POS: [-2.35, 2.25, 4.9] as [number, number, number],
+  // The live SHIPPED manifest sits in the upper LEFT, brought in from the old far-left
+  // spot so it stays inside the forward view on a laptop, and lifted just above the
+  // centre hint so the two never overlap. (It draws on top, like the other port cards.)
+  DEBUG_POS: [-1.5, 2.45, 4.9] as [number, number, number],
   DEBUG_W: 1.15, DEBUG_H: 0.92,
   // ---- SCORING: correct loads -> the three meters ----  The Port LEANS ON Economic
   // Impact (the other three stops lean on Innovation and Problem Solving). Every
@@ -1041,6 +1080,13 @@ const PORT = {
   RESULT_BIG:  "Amazing work! You kept the whole world trading through Virginia.",
   RESULT_MID:  "Great job! You sent goods out to ports across the globe.",
   RESULT_WARM: "Nice start! Every container helps Virginia trade with the world.",
+  // The "why the meters grew" framing, shown UNDER the three gains in the result card (a
+  // smaller, calmer sub-note). One short line per meter, in the SAME order the gains list
+  // them, so the student learns what each one rewarded. Newlines keep them on tidy rows.
+  RESULT_WHY:
+    "Economic Impact: trade like this supports about one in five Virginia jobs.\n" +
+    "Innovation Thinking: you reached markets around the world.\n" +
+    "Problem Solving: you matched each product to the right market.",
   // ---- the round-end FINISH button -> result panel -> RETURN button ----  The student
   // loads at their own pace; FINISH (lower-right, kept clear of the ship pads) ends the
   // round and brings up the result. RETURN (same spot, shown WITH the result) lands the
@@ -1048,7 +1094,7 @@ const PORT = {
   // the intro uses and draws on top, so it never clips the dock or ships.
   FINISH_POS: [1.7, 0.9, 3.45] as [number, number, number], FINISH_W: 1.0, FINISH_H: 0.36,
   RETURN_POS: [1.7, 0.9, 3.45] as [number, number, number], RETURN_W: 1.5, RETURN_H: 0.36,
-  RESULT_POS: [0, 1.82, 3.3] as [number, number, number], RESULT_W: 2.2,
+  RESULT_POS: [0, 1.9, 3.3] as [number, number, number], RESULT_W: 2.2, // lifted a touch so the taller why-framed card still clears the containers below
   // ---- on-arrival DIRECTIONS (guidance only; mechanic/count/timers are untouched) ----
   // An intro panel + Start button explain the goal, then a short hint follows the play.
   // All sit ABOVE the dock and draw on top (depthTest off), so they never cover the ships,
@@ -1056,8 +1102,16 @@ const PORT = {
   // intro rides the calm, comfortable runner depth (z~3.3); the Start button rides its
   // lower margin; the hint floats just above the shelf, clear of the centre ship's mast.
   INTRO_POS: [0, 2.45, 3.3] as [number, number, number], INTRO_W: 2.1,
-  START_POS: [0, 2.04, 3.2] as [number, number, number], START_W: 0.95, START_H: 0.26,
+  START_POS: [0, 1.74, 3.2] as [number, number, number], START_W: 0.95, START_H: 0.26, // sits just below the arrival card so the full directions show above it
   HINT_POS: [0, 1.9, 5.7] as [number, number, number], HINT_W: 1.8, HINT_H: 0.34,
+  // ---- the WHY-FACT pop (the teaching layer) ----  A brief parchment card on each correct
+  // load, set HIGH and centered so it covers neither the ships (their tops sit well below)
+  // nor the conveyor; the running hint hides while it shows so the two never overlap. It
+  // fades in, holds long enough to read, then fades out on its own, so it never blocks play.
+  FACT_POS: [0, 2.0, 5.0] as [number, number, number], FACT_W: 1.9, FACT_H: 0.52,
+  FACT_IN_MS: 240,            // gentle fade IN (never a pop)
+  FACT_HOLD_MS: 2600,         // held fully visible, long enough to read one line
+  FACT_OUT_MS: 760,           // gentle fade OUT, so it clears itself without a tap
 };
 
 // ============================================================================
@@ -1681,9 +1735,42 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         camera.rotation.set(lookPitch, lookYaw, 0, "YXZ");
       }
     }
-    requestAnimationFrame(browserLookLoop);
   }
-  browserLookLoop();
+  // setInterval, never requestAnimationFrame (the project's headset rule, since rAF
+  // pauses in the headset). This loop only steers the desktop PREVIEW camera and is a
+  // no-op in the headset, so a 33ms tick is more than enough.
+  setInterval(browserLookLoop, 33);
+
+  // --------------------------------------------------------------------------
+  // DESKTOP-ONLY WIDE VIEW
+  // On a laptop the whole scene is rendered through one flat window, so anything
+  // outside a narrow forward cone needs a camera drag to reach. The engine builds
+  // the camera at a 50 degree vertical field of view; at that fov the play areas
+  // (the hub row, the runner's side button, the close conveyor) spill past the
+  // screen edges. Widening the PREVIEW camera's fov a little pulls every screen's
+  // buttons and panels into the default forward view at once, with no dragging.
+  //
+  // This is DESKTOP ONLY. In the headset the XR system supplies its own per-eye
+  // projection and owns the view, and the engine snapshots + restores the camera
+  // around each XR session, so a wider desktop fov never reaches the headset. To be
+  // certain the headset is untouched we also hand the camera back its ORIGINAL fov
+  // whenever the experience is immersive (that also keeps presentPanel's in-headset
+  // sizing identical to before). The fov is only re-applied when it actually changes,
+  // and this is setInterval, not requestAnimationFrame (rAF pauses in a headset).
+  const ORIGINAL_FOV = (camera as any).fov;            // the engine default (50); the headset keeps this
+  const DESKTOP_FOV = Math.max(ORIGINAL_FOV, 70);      // a modestly wider laptop overview (never narrower)
+  function desktopFovLoop() {
+    const cam = camera as any;
+    if (typeof cam.fov !== "number" || typeof cam.updateProjectionMatrix !== "function") return;
+    const desktopView = world.visibilityState.peek() === VisibilityState.NonImmersive;
+    const want = desktopView ? DESKTOP_FOV : ORIGINAL_FOV;
+    if (cam.fov !== want) {
+      cam.fov = want;
+      cam.updateProjectionMatrix();
+    }
+  }
+  setInterval(desktopFovLoop, 33);
+  desktopFovLoop(); // frame the very first desktop frame wide, before the first tick
 
   // --------------------------------------------------------------------------
   // HIDDEN-PANEL CLICK GUARD
@@ -4126,16 +4213,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // ======================================================================
   // PORT OF VIRGINIA  —  the signature stop's custom container-loading game.
   // buildPortScene() is the calm dock + harbor backdrop (registered like the other
-  // stops' scenes). buildPortGame() is the game: three ships, a recycling supply of
-  // color-coded containers, and the match-and-load loop. The interaction is the SAME
+  // stops' scenes). buildPortGame() is the game: three MARKET ships, a recycling supply
+  // of PRODUCT containers, and the match-and-load loop. The interaction is the SAME
   // point-and-click the map landmarks and the choice cards use (Interactable + a fresh
-  // Pressed edge), so it is reliable and familiar: TAP a container to select it (it
+  // Pressed edge), so it is reliable and familiar: TAP a product to select it (it
   // lifts and glows; tapping it again or empty water deselects), then TAP a ship to
-  // send it flying there in a smooth arc. Reaching the MATCHING ship loads it (chime +
-  // the ship glows gold and its count goes up); the wrong ship gently refuses (a soft
-  // click + a red blink) and the container flies back to its slot, no penalty. Only one
-  // container is selected and in flight at a time. Every loop and animation is
-  // setInterval (rAF pauses in the headset).
+  // send it flying there in a smooth arc. Reaching the ship whose market WANTS that
+  // product loads it (chime + the ship glows gold and its count goes up); the wrong
+  // market gently refuses (a soft click + a red blink) and the product flies back to its
+  // slot, no penalty. Only one product is selected and in flight at a time. Every loop and
+  // animation is setInterval (rAF pauses in the headset).
   // ======================================================================
 
   // A small readable sign baked on a canvas (DOM panels do not show in the headset),
@@ -4169,6 +4256,135 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       new PlaneGeometry(0.82, 0.30),
       new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
     );
+  }
+
+  // A small "what this market buys" placard for a ship's bow. The wants line is split at
+  // the colon into a heading line and a products line so it reads in two clear rows, dark
+  // on parchment with the ship's color as the border. Front faces +Z, toward the student.
+  function wantsSign(text: string, accent: string): Mesh {
+    const W = 600, H = 200;
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+    ctx.fillStyle = "#fbf3dd";
+    ctx.fillRect(10, 10, W - 20, H - 20);
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = accent;
+    ctx.strokeRect(10, 10, W - 20, H - 20);
+    ctx.fillStyle = "#14253c";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const fit = (s: string, start: number) => {
+      let sz = start;
+      do { ctx.font = "bold " + sz + "px sans-serif"; sz -= 2; }
+      while (ctx.measureText(s).width > W - 64 && sz > 16);
+    };
+    const ci = text.indexOf(": ");
+    if (ci >= 0) {
+      const head = text.slice(0, ci + 1);   // e.g. "Europe buys:"
+      const items = text.slice(ci + 2);     // e.g. "Machines, Lumber"
+      fit(head, 44); ctx.fillText(head, W / 2, 74);
+      fit(items, 56); ctx.fillText(items, W / 2, 140);
+    } else {
+      fit(text, 52); ctx.fillText(text, W / 2, H / 2);
+    }
+    const tex = new CanvasTexture(c);
+    tex.colorSpace = SRGBColorSpace;
+    return new Mesh(
+      new PlaneGeometry(1.1, (1.1 * H) / W),
+      new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+    );
+  }
+
+  // A simple white icon drawn on a container face: a picture cue for the product so a
+  // student who cannot read the label yet has more than color to go on. Every shape is a
+  // basic canvas primitive (no art assets). hole is the face color, used to "punch" gaps
+  // (gear center, log rings, fish eye) without making the texture transparent.
+  function drawProductIcon(
+    ctx: CanvasRenderingContext2D, icon: string,
+    cx: number, cy: number, r: number, fill: string, hole: string,
+  ) {
+    ctx.save();
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const disc = (x: number, y: number, rr: number, col: string) => {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill();
+    };
+    if (icon === "soybeans") {            // a little pod of three beans
+      disc(cx - r * 0.55, cy, r * 0.34, fill);
+      disc(cx, cy - r * 0.12, r * 0.34, fill);
+      disc(cx + r * 0.55, cy, r * 0.34, fill);
+    } else if (icon === "coal") {         // a chunky lump
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.9, cy + r * 0.1);
+      ctx.lineTo(cx - r * 0.4, cy - r * 0.7);
+      ctx.lineTo(cx + r * 0.5, cy - r * 0.55);
+      ctx.lineTo(cx + r * 0.95, cy + r * 0.2);
+      ctx.lineTo(cx + r * 0.35, cy + r * 0.8);
+      ctx.lineTo(cx - r * 0.6, cy + r * 0.7);
+      ctx.closePath(); ctx.fill();
+    } else if (icon === "gear") {         // a toothed gear with a punched hub
+      ctx.fillStyle = fill;
+      const teeth = 8;
+      for (let i = 0; i < teeth; i++) {
+        const a = (i / teeth) * Math.PI * 2;
+        ctx.save();
+        ctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.rotate(a);
+        ctx.fillRect(-r * 0.2, -r * 0.2, r * 0.4, r * 0.4);
+        ctx.restore();
+      }
+      disc(cx, cy, r * 0.72, fill);
+      disc(cx, cy, r * 0.3, hole);
+    } else if (icon === "lumber") {       // three stacked log ends (rings)
+      const pos: [number, number][] = [[cx - r * 0.5, cy + r * 0.4], [cx + r * 0.5, cy + r * 0.4], [cx, cy - r * 0.45]];
+      for (const [x, y] of pos) { disc(x, y, r * 0.44, fill); disc(x, y, r * 0.2, hole); }
+    } else if (icon === "chicken") {      // a drumstick: a round end and a bone
+      disc(cx - r * 0.2, cy - r * 0.2, r * 0.6, fill);
+      ctx.strokeStyle = fill; ctx.lineWidth = r * 0.34;
+      ctx.beginPath(); ctx.moveTo(cx + r * 0.1, cy + r * 0.1); ctx.lineTo(cx + r * 0.8, cy + r * 0.8); ctx.stroke();
+      disc(cx + r * 0.86, cy + r * 0.86, r * 0.2, fill);
+    } else if (icon === "fish") {         // an oval body with a triangle tail and an eye
+      ctx.fillStyle = fill;
+      ctx.beginPath(); ctx.ellipse(cx + r * 0.1, cy, r * 0.85, r * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy);
+      ctx.lineTo(cx - r * 1.15, cy - r * 0.5);
+      ctx.lineTo(cx - r * 1.15, cy + r * 0.5);
+      ctx.closePath(); ctx.fill();
+      disc(cx + r * 0.55, cy - r * 0.12, r * 0.12, hole);
+    }
+    ctx.restore();
+  }
+
+  // The product face for a container: the market's backup color fills the cube (so it
+  // still reads red / blue / green at a glance), with a white product icon in the color
+  // field and the product name on a cream strip below. Painted once per product, reused.
+  function productFaceTexture(p: { name: string; color: string; icon: string }): CanvasTexture {
+    const S = 256;
+    const c = document.createElement("canvas");
+    c.width = S; c.height = S;
+    const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+    ctx.fillStyle = p.color;                  // the dominant backup color (the match-by-color aid)
+    ctx.fillRect(0, 0, S, S);
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";     // a faint edge so the cube reads as a box
+    ctx.lineWidth = 12;
+    ctx.strokeRect(6, 6, S - 12, S - 12);
+    drawProductIcon(ctx, p.icon, S / 2, 86, 44, "#ffffff", p.color);
+    ctx.fillStyle = "#fbf3dd";                // a cream name strip across the lower third
+    const sy = 158, sh = 78;
+    if ((ctx as any).roundRect) { ctx.beginPath(); (ctx as any).roundRect(18, sy, S - 36, sh, 14); ctx.fill(); }
+    else ctx.fillRect(18, sy, S - 36, sh);
+    ctx.fillStyle = "#14253c";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let size = 46;
+    do { ctx.font = "bold " + size + "px sans-serif"; size -= 2; }
+    while (ctx.measureText(p.name).width > S - 56 && size > 14);
+    ctx.fillText(p.name, S / 2, sy + sh / 2);
+    const tex = new CanvasTexture(c);
+    tex.colorSpace = SRGBColorSpace;
+    return tex;
   }
 
   // The calm backdrop: a wood dock underfoot, open harbor water the ships sit in,
@@ -4291,7 +4507,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // One low-poly ship: a colored hull, a deck rim, a stern wheelhouse, a mast with a
   // destination-colored flag, and a destination label facing the student. The group
   // sits at the ship's dock position; the game's tick() bobs and pulses it.
-  function buildShip(ship: { key: string; label: string; color: string; pos: [number, number, number] }) {
+  function buildShip(ship: { key: string; label: string; color: string; wants: string; pos: [number, number, number] }) {
     const g = new Group();
     const H = PORT.SHIP_HULL_H;
     const hull = meshBox(PORT.SHIP_HULL_W, H, PORT.SHIP_HULL_D, ship.color);
@@ -4314,6 +4530,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const sign = portSign(ship.label, ship.color);
     sign.position.set(0, PORT.DECK_Y + 0.5, 0.02);
     g.add(sign);
+    // the "what this market buys" placard, mounted flat on the bow (front face, toward the
+    // student) and low on the hull so it clears the name sign, the cabin, and the mast.
+    const wsign = wantsSign(ship.wants, ship.color);
+    wsign.position.set(0, PORT.DECK_Y - 0.18, PORT.SHIP_HULL_D / 2 + 0.02);
+    g.add(wsign);
     g.position.set(ship.pos[0], 0, ship.pos[2]);
     return { group: g, hull };
   }
@@ -4322,21 +4543,30 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const group = new Group();   // ships + the debug panel live here (hide with the scene)
     let portClock = 0;
 
-    // a container's color is exactly its destination ship's color (one source of truth).
+    // a market's color is its ship's color (one source of truth for the manifest swatches).
     const colorByKey: Record<string, string> = {};
     for (const s of PORT.SHIPS) colorByKey[s.key] = s.color;
 
-    // ---- the three ships, each with an invisible hit-pad the student TAPS to send the
-    // selected container. The pad is its OWN entity (createTransformEntity reparents it to
-    // the scene root), invisible (opacity 0) yet still a ray target; start()/stop() toggle
-    // its visibility so it is tappable only inside the port and never blocks the hub. ----
+    // the six products, looked up by name, plus a painted face texture per product (built
+    // once and reused as containers cycle). A container shows a product; the product's
+    // market decides which ship it belongs on, and its backup color tints the cube.
+    const productByName: Record<string, { name: string; market: string; color: string; icon: string }> = {};
+    const texByProduct: Record<string, CanvasTexture> = {};
+    for (const p of PORT.PRODUCTS) { productByName[p.name] = p; texByProduct[p.name] = productFaceTexture(p); }
+
+    // ---- the three ships, each with ONE generous invisible hit-pad wrapping the whole ship
+    // the student TAPS to send the selected container. The pad is its OWN entity
+    // (createTransformEntity reparents it to the scene root) and fully transparent (opacity 0).
+    // It is a ray target ONLY while a container is selected (tick adds/removes its Interactable),
+    // so between loads the ray passes through it to the Finish button, and it never blocks the hub. ----
     // x/z are the fixed BERTH coords; the ship's live group.position.z slides out and
-    // back during a departure cycle. state: "docked" (loadable, pad on) -> "sailing"
-    // (out to sea, pad off) -> "arriving" (a fresh same-destination ship pulls in) ->
+    // back during a departure cycle. state: "docked" (loadable, pad live) -> "sailing"
+    // (out to sea, pad inert) -> "arriving" (a fresh same-destination ship pulls in) ->
     // "docked". dockTimer counts the calm docked stretch; sailT drives the sail anim.
+    // padLive tracks whether the pad is currently a ray target, so we toggle only on a change.
     const ships: {
       key: string; x: number; z: number; group: Group; hull: any; pulse: number;
-      pad: any; padMesh: any; padWasPressed: boolean;
+      pad: any; padMesh: any; padWasPressed: boolean; padLive: boolean;
       state: string; dockTimer: number; sailT: number;
     }[] = [];
     let shipIdx = 0;
@@ -4345,14 +4575,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       group.add(built.group);
       const padMesh = meshBox(PORT.PAD_W, PORT.PAD_H, PORT.PAD_D, "#ffffff");
       (padMesh.material as any).transparent = true;
-      (padMesh.material as any).opacity = 0;       // invisible to the eye, but still raycasts (the tap target)
+      (padMesh.material as any).opacity = 0;       // fully transparent, never a hidden mesh, so it always registers a tap
       (padMesh.material as any).depthWrite = false;
       padMesh.castShadow = false; padMesh.receiveShadow = false;
       padMesh.position.set(s.pos[0], PORT.PAD_Y, s.pos[2]);
       padMesh.visible = false;                      // shown only inside the port (start/stop)
-      const pad = world.createTransformEntity(padMesh).addComponent(Interactable);
+      // Born INERT (no Interactable): tick adds it as a ray target only while a container is
+      // selected, and removes it otherwise, so it never shadows the Finish button or the hub.
+      const pad = world.createTransformEntity(padMesh);
       ships.push({ key: s.key, x: s.pos[0], z: s.pos[2], group: built.group, hull: built.hull,
-                   pulse: 0, pad, padMesh, padWasPressed: false,
+                   pulse: 0, pad, padMesh, padWasPressed: false, padLive: false,
                    state: "docked", dockTimer: PORT.DOCK_MS_FIRST + shipIdx * PORT.DOCK_STAGGER, sailT: 0 });
       shipIdx++;
     }
@@ -4492,7 +4724,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // target hit guard, untappable) until it rejoins the belt. Rotation stays locked so
     // the cube reads upright and its color stays clear (scale carries the belt-end fade).
     type Cont = {
-      entity: any; mesh: any; key: string; slot: number; state: string; wasPressed: boolean;
+      entity: any; mesh: any; key: string; product: string; slot: number; state: string; wasPressed: boolean;
       fx: number; fy: number; fz: number;         // flight / return START point (world)
       tx: number; ty: number; tz: number;         // flight TARGET point: the ship deck (world)
       targetShip: any;                            // the ship a flying container is bound for
@@ -4508,7 +4740,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       mesh.visible = false;
       mesh.position.set(0, PORT.PARK_Y, 0);
       const entity = world.createTransformEntity(mesh).addComponent(Interactable);
-      conts.push({ entity, mesh, key: "europe", slot: i, state: "parked", wasPressed: false,
+      conts.push({ entity, mesh, key: "europe", product: "Machines", slot: i, state: "parked", wasPressed: false,
                    fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0, targetShip: null,
                    t: 0, dur: 0, tint: 0, timer: 0, heldX: 0, appearT: PORT.ENTER_MS });
     }
@@ -4535,7 +4767,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // Start dismisses it and begins play; the in-play hint below reminds the controls.
     const introPanel = makeTextPanel(
       "Port of Virginia",
-      "Welcome to the Port of Virginia in Norfolk. Load each container onto the ship that matches its color.",
+      "The Port of Virginia in Norfolk is one of the busiest ports in the country. It connects Virginia to over 200 countries. Load each product onto the ship for the market that wants it.",
       PORT.INTRO_W,
     );
     onTop(introPanel);
@@ -4607,6 +4839,75 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       hintTex.needsUpdate = true;
     }
 
+    // (3) THE WHY-FACT POP (the teaching layer): a brief parchment card shown on each
+    // CORRECT load so the student learns from the trade, not just sorts it. It is its own
+    // canvas (drawn only when the fact changes, so nothing flashes), sits HIGH and centered
+    // above the ships + belt (covering neither), and the running hint hides while it shows.
+    // The fade rides the material opacity on setInterval, so it clears itself and never
+    // blocks play. factT is the elapsed ms of the current fact's life.
+    const factCanvas = document.createElement("canvas");
+    factCanvas.width = 1024; factCanvas.height = 300;
+    const fcx = factCanvas.getContext("2d") as CanvasRenderingContext2D;
+    const factTex = new CanvasTexture(factCanvas);
+    factTex.colorSpace = SRGBColorSpace;
+    const factMesh = new Mesh(
+      new PlaneGeometry(PORT.FACT_W, PORT.FACT_H),
+      new MeshBasicMaterial({ map: factTex, transparent: true, side: DoubleSide }),
+    );
+    onTop(factMesh);
+    factMesh.position.set(PORT.FACT_POS[0], PORT.FACT_POS[1], PORT.FACT_POS[2]);
+    factMesh.visible = false;
+    group.add(factMesh);
+    let factActive = false;
+    let factT = 0;
+    function drawFact(text: string) {
+      const W = 1024, Hh = 300;
+      fcx.clearRect(0, 0, W, Hh);
+      // a warm parchment card with a gold border, distinct from the navy hint pill
+      fcx.fillStyle = "#fbf3dd";
+      if ((fcx as any).roundRect) { fcx.beginPath(); (fcx as any).roundRect(14, 14, W - 28, Hh - 28, 34); fcx.fill(); }
+      else fcx.fillRect(14, 14, W - 28, Hh - 28);
+      fcx.lineWidth = 10; fcx.strokeStyle = "#caa24a";
+      if ((fcx as any).roundRect) { fcx.beginPath(); (fcx as any).roundRect(14, 14, W - 28, Hh - 28, 34); fcx.stroke(); }
+      else fcx.strokeRect(14, 14, W - 28, Hh - 28);
+      // a small gold eyebrow, so the pop reads as a friendly fact
+      fcx.fillStyle = "#8a6118";
+      fcx.textAlign = "center"; fcx.textBaseline = "middle";
+      fcx.font = "bold 32px sans-serif";
+      fcx.fillText("DID YOU KNOW?", W / 2, 60);
+      // the fact, navy, shrunk just enough to sit on two comfortable lines
+      fcx.fillStyle = "#1F3A5F";
+      let size = 46, lines: string[] = [];
+      do {
+        fcx.font = "bold " + size + "px sans-serif";
+        lines = []; let line = "";
+        for (const w of text.split(" ")) {
+          const t = line ? line + " " + w : w;
+          if (fcx.measureText(t).width > W - 130 && line) { lines.push(line); line = w; }
+          else line = t;
+        }
+        if (line) lines.push(line);
+        size -= 3;
+      } while (lines.length > 2 && size > 26);
+      const lh = 60, startY = 150 - ((lines.length - 1) * lh) / 2 + 28;
+      for (let i = 0; i < lines.length; i++) fcx.fillText(lines[i], W / 2, startY + i * lh);
+      factTex.needsUpdate = true;
+    }
+    function showFact(productName: string) {  // a correct load: pop the product's why-fact
+      const f = PORT.WHY_FACT[productName];
+      if (!f) return;
+      drawFact(f);
+      factT = 0;
+      factActive = true;
+      factMesh.visible = true;
+      (factMesh.material as any).opacity = 0;  // tick fades it in from 0
+    }
+    function clearFact() {                    // tidy the fact (round end / leaving the stop)
+      factActive = false; factT = 0;
+      factMesh.visible = false;
+      (factMesh.material as any).opacity = 1;
+    }
+
     function showIntro() {                    // arrival: read the directions, hint hidden until Start
       portStarted = false;
       introPanel.visible = true;
@@ -4625,7 +4926,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       portFinishMesh.scale.setScalar(1);
       portFinishWasPressed = !!portFinishBtn.hasComponent(Pressed); // never fire on a carried-over press
       hintMesh.visible = true;
-      hintState = "pick"; drawHint("Tap a container to pick it up");
+      hintState = "pick"; drawHint("Tap a product to pick it up");
       sfxClick();
     }
 
@@ -4659,6 +4960,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (selectedCont) deselectCont(selectedCont); // drop any lifted container so the count is final
       portFinishMesh.visible = false;
       hintMesh.visible = false;
+      clearFact();                           // tidy any mid-fade why-fact so it never sits over the result
+      panelMesh.visible = false;             // hide the live SHIPPED manifest; the result's gains replace it
       const a = computeAward();
       sfxFanfare();                          // a warm, celebratory cue (no fail state)
       // The friendly line, by how many they shipped correctly. Every tier is positive.
@@ -4666,14 +4969,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (a.total >= PORT.HAUL_BIG_AT) line = PORT.RESULT_BIG;
       else if (a.total >= PORT.HAUL_MID_AT) line = PORT.RESULT_MID;
       const noun = a.total === 1 ? "container" : "containers";
-      const note = line + "  You shipped " + a.total + " " + noun + " to the right ships.";
+      const note = line + "  You shipped " + a.total + " " + noun + " to the right markets.";
       const changes = [
         { label: "Economic Impact", delta: a.ei },
         { label: "Innovation Thinking", delta: a.it },
         { label: "Problem Solving", delta: a.ps },
       ];
       if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
-      resultMesh = makeReadoutCard(changes, note, { widthMeters: PORT.RESULT_W });
+      // The why-framing (PORT.RESULT_WHY) rides UNDER the gains as a calm sub-note, so the
+      // result explains WHY each meter grew, not just by how much.
+      resultMesh = makeReadoutCard(changes, note, { widthMeters: PORT.RESULT_W, subNote: PORT.RESULT_WHY });
       onTop(resultMesh);
       resultMesh.position.set(PORT.RESULT_POS[0], PORT.RESULT_POS[1], PORT.RESULT_POS[2]);
       group.add(resultMesh);
@@ -4689,14 +4994,22 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
 
     let refillIdx = 0;
-    function nextRefillColor(): string {
-      const k = PORT.REFILL_CYCLE[refillIdx % PORT.REFILL_CYCLE.length];
+    function nextRefillProduct(): string {
+      const k = PORT.REFILL_PRODUCTS[refillIdx % PORT.REFILL_PRODUCTS.length];
       refillIdx++;
       return k;
     }
-    function recolor(ct: Cont, key: string) {
-      ct.key = key;
-      (ct.mesh.material as any).color = new Color(colorByKey[key]);
+    // Set which PRODUCT a container carries: its market drives the match (ct.key, kept so
+    // sh.key === ct.key still decides a correct load) and its painted face shows the
+    // product name + icon over the market's backup color. Base color stays white so the
+    // texture reads true; the gold/red glow still rides emissive, untouched.
+    function recolor(ct: Cont, productName: string) {
+      const p = productByName[productName];
+      ct.product = productName;
+      ct.key = p.market;
+      (ct.mesh.material as any).map = texByProduct[productName];
+      (ct.mesh.material as any).color.set("#ffffff");
+      (ct.mesh.material as any).needsUpdate = true;
     }
     function park(ct: Cont) {              // hide a container far below the world: gone AND untappable
       ct.state = "parked"; ct.dur = 0; ct.tint = 0; ct.timer = 0;
@@ -4761,30 +5074,46 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
 
     // ---- ARRIVAL ----  The flying container reached its ship: this is the KEPT match-and-
-    // count logic. Match => it loads (chime, the ship glows gold, its count goes up, and a
-    // fresh container refills the slot shortly). Wrong => a soft click + a red blink and it
+    // count logic, now matching on MARKET. Correct (the product's market is the ship's
+    // market) => it loads (chime, the ship glows gold, its count goes up, and a fresh
+    // product refills the slot shortly). Wrong market => a soft click + a red blink and it
     // flies back to its slot, no penalty. Either way the game is ready for the next tap.
     function onArrive(ct: Cont) {
       const sh = ct.targetShip;
       flyingCont = null;
       ct.targetShip = null;
-      if (sh && sh.key === ct.key) {
+      if (sh && sh.key === ct.key) {       // ct.key is the product's market; match it to the ship's market
         sfxChime();                        // a clear, happy "loaded!"
         counts[ct.key] = (counts[ct.key] || 0) + 1;
         sh.pulse = 1;                      // the ship glows gold, eased down in tick
         drawCounts();
+        showFact(ct.product);              // the teaching layer: a brief why-fact for this product
         park(ct);                          // it snaps aboard and is gone from the dock...
         ct.state = "loaded"; ct.timer = PORT.REFILL_MS; // ...and a fresh one refills the slot shortly
-        console.log("[PORT] loaded " + ct.key + " => totals", { ...counts });
+        console.log("[PORT] loaded " + ct.product + " => " + ct.key + " totals", { ...counts });
       } else {
-        sfxClick();                        // a soft, gentle "not that ship"
+        sfxClick();                        // a soft, gentle "not that market"
         ct.tint = 1;                       // a brief red blink, eased down in tick
         startReturn(ct);                   // and it flies back to its slot, no penalty
-        console.log("[PORT] wrong ship: " + ct.key + " over " + (sh ? sh.key : "?"));
+        console.log("[PORT] wrong market: " + ct.product + " (" + ct.key + ") over " + (sh ? sh.key : "?"));
       }
     }
 
     function tick() {
+      // THE WHY-FACT FADE (teaching layer): ease the fact card in, hold it, then ease it
+      // out, all on the material opacity so nothing flashes and it clears itself without a
+      // tap. setInterval-driven like every other loop. When done, it hides and frees play.
+      if (factActive) {
+        factT += PORT.TICK_MS;
+        const inMs = PORT.FACT_IN_MS, hold = PORT.FACT_HOLD_MS, out = PORT.FACT_OUT_MS;
+        let a: number;
+        if (factT < inMs) a = factT / inMs;                                  // ease in
+        else if (factT < inMs + hold) a = 1;                                  // hold to read
+        else if (factT < inMs + hold + out) a = 1 - (factT - inMs - hold) / out; // ease out
+        else { a = 0; factActive = false; factMesh.visible = false; }
+        (factMesh.material as any).opacity = Math.max(0, Math.min(1, a));
+      }
+
       // Advance the CONVEYOR a little (slow + calm) and scroll the chevron surface to
       // match, so the belt always reads as quietly running. setInterval-driven, not rAF.
       const beltAdvance = PORT.BELT_SPEED * (PORT.TICK_MS / 1000);
@@ -4840,6 +5169,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
             sh.padMesh.visible = true;
           }
         }
+
+        // ---- WHOLE-SHIP TAP TARGET gating ----  The big invisible pad is a live ray target
+        // ONLY while the student is holding a container AND this berth is docked. Any other
+        // time it leaves the ray set, so an idle aim drops THROUGH it to the Finish button
+        // behind the green berth, a sailed-out berth is never a target, and nothing lingers
+        // between loads. Flip on a real change only, so there is no per-frame component churn.
+        const wantLive = portStarted && !ended && !!selectedCont && !flyingCont && sh.state === "docked";
+        if (wantLive !== sh.padLive) {
+          sh.padLive = wantLive;
+          if (wantLive) sh.pad.addComponent(Interactable);
+          else sh.pad.removeComponent(Interactable);
+          sh.padWasPressed = false;                 // re-arm: never fire on a carried-over press
+        }
       }
       for (const ct of conts) {
         if (ct.state === "flying") {
@@ -4886,7 +5228,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         }
         if (ct.state === "loaded" && ct.timer > 0) {
           ct.timer -= PORT.TICK_MS;
-          if (ct.timer <= 0) { recolor(ct, nextRefillColor()); toSlot(ct, true); } // a fresh cube rejoins the belt, scaling in
+          if (ct.timer <= 0) { recolor(ct, nextRefillProduct()); toSlot(ct, true); } // a fresh product rejoins the belt, scaling in
           continue;
         }
         if (ct.state === "idle") {
@@ -4951,8 +5293,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         const want = selectedCont ? "ship" : "pick";
         if (want !== hintState) {
           hintState = want;
-          drawHint(want === "ship" ? "Now tap the ship with the same color" : "Tap a container to pick it up");
+          drawHint(want === "ship" ? "Now send it to the ship that wants it" : "Tap a product to pick it up");
         }
+        hintMesh.visible = !factActive && !ended;  // the why-fact briefly takes the centre; the hint returns as it fades (and a FINISH press this same tick keeps it hidden under the result)
       } else {
         // The result is up: a fresh press of RETURN lands the score (finishStop ->
         // completeStop with the real pendingAward) and fades back to the map.
@@ -4968,6 +5311,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       portClock = 0; refillIdx = 0; beltOffset = 0;
       counts.europe = 0; counts.asia = 0; counts.usa = 0;
       drawCounts();
+      panelMesh.visible = true;                  // the SHIPPED manifest is back for a fresh round
+      clearFact();                               // no leftover why-fact from a prior visit
       ended = false; portFinishWasPressed = false; returnWasPressed = false; // a fresh round, no result yet
       portFinishMesh.visible = false;            // FINISH appears only once play starts (beginPlay)
       returnMesh.visible = false;                // RETURN appears only with the result (endRound)
@@ -4987,17 +5332,20 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         const ct = conts[i];
         ct.slot = i;
         (ct.mesh.material as any).emissive.set(PORT.WRONG_GLOW); // clear any leftover gold selection glow
-        recolor(ct, PORT.START_COLORS[i % PORT.START_COLORS.length]);
+        recolor(ct, PORT.START_PRODUCTS[i % PORT.START_PRODUCTS.length]);
         toSlot(ct, true);                        // the supply scales in onto the moving belt
       }
       showIntro();                               // greet the student with the directions; Start begins play
     }
     function stop() {
       for (const ct of conts) park(ct); // hidden + unreachable, so nothing leaks back to the hub
+      clearFact();                       // park the why-fact so nothing lingers into the hub
       selectedCont = null; flyingCont = null;
       catchMesh.visible = false;                 // park the catcher so it never blocks the hub
       for (const sh of ships) {
         sh.padWasPressed = false; sh.padMesh.visible = false;
+        if (sh.pad.hasComponent(Interactable)) sh.pad.removeComponent(Interactable); // leave the ray set so the pad never lingers in the hub
+        sh.padLive = false;
         sh.state = "docked"; sh.group.position.set(sh.x, 0, sh.z); sh.group.scale.setScalar(1); sh.group.visible = true;
       }
       portStarted = false; startWasPressed = false; // tidy the directions so nothing leaks to the hub
@@ -5843,17 +6191,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // A panel's UI document loads over a frame or two. Run wiring once it is ready.
   function whenPanelReady(entity: any, callback: (doc: any) => void) {
-    const check = function () {
+    // Poll on setInterval, never requestAnimationFrame: rAF pauses the moment an
+    // immersive session starts, which could leave a panel's buttons unwired if its
+    // document finishes loading right as the student enters the headset. The interval
+    // clears itself as soon as the doc is ready, so it costs nothing after wiring.
+    const timer = setInterval(function () {
       if (entity.hasComponent(PanelDocument)) {
         const doc = entity.getValue(PanelDocument, "document");
         if (doc) {
+          clearInterval(timer);
           callback(doc);
-          return;
         }
       }
-      requestAnimationFrame(check);
-    };
-    check();
+    }, 33);
   }
 
   // The title card, floating in front of where you start.
