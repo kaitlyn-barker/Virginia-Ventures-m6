@@ -578,13 +578,15 @@ export function makeGoalCard(
   intro: string,
   bullets: string[],
   widthMeters = 1.95,
+  eyebrow?: string,          // optional experience-name header, painted in gold above the title
 ): Mesh {
   const W = 1024;
   const padX = 74;          // left/right inner margin for the bullet text
   const dotGap = 56;        // how far the wrapped text hangs past the gold dot
   const textW = W - padX * 2 - dotGap;
 
-  // Font sizes and line heights for the three bands.
+  // Font sizes and line heights for the bands.
+  const EYE_F = 44, EYE_LH = 54, afterEyebrow = 16; // the experience-title header (only when eyebrow is passed)
   const TITLE_F = 70, TITLE_LH = 82;
   const INTRO_F = 46, INTRO_LH = 58;
   const BULLET_F = 40, BULLET_LH = 50, BULLET_GAP = 20;
@@ -594,7 +596,7 @@ export function makeGoalCard(
   const tmp = document.createElement("canvas").getContext("2d") as CanvasRenderingContext2D;
   tmp.font = BULLET_F + "px sans-serif";
   const wrapped = bullets.map(function (b) { return wrapLines(tmp, b, textW); });
-  let h = topPad + TITLE_LH + afterTitle + INTRO_LH + afterIntro;
+  let h = topPad + (eyebrow ? EYE_LH + afterEyebrow : 0) + TITLE_LH + afterTitle + INTRO_LH + afterIntro;
   for (const lines of wrapped) h += lines.length * BULLET_LH + BULLET_GAP;
   h += botPad;
   const H = Math.round(h);
@@ -614,10 +616,23 @@ export function makeGoalCard(
   ctx.stroke();
 
   ctx.textBaseline = "top";
+  ctx.textAlign = "center";
   let y = topPad;
 
+  // Experience-title header, in warm gold, centered. Auto-shrinks so the full name
+  // always fits on one line with comfortable margins.
+  if (eyebrow) {
+    ctx.fillStyle = "#8a6118";
+    let ef = EYE_F;
+    do {
+      ctx.font = "bold " + ef + "px sans-serif";
+      ef -= 2;
+    } while (ctx.measureText(eyebrow).width > W - padX * 2 && ef > 22);
+    ctx.fillText(eyebrow, W / 2, y);
+    y += EYE_LH + afterEyebrow;
+  }
+
   // Title, large and dark, centered.
-  ctx.textAlign = "center";
   ctx.fillStyle = "#5b3a24";
   ctx.font = "bold " + TITLE_F + "px sans-serif";
   ctx.fillText(title, W / 2, y);

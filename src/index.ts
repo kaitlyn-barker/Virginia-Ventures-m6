@@ -227,6 +227,7 @@ const ONBOARD = {
 // waits for that tap. rest is the calm line Fox is left on once the gate opens.
 const ONBOARD_LINES = {
   speaker: "Foreman Fox",
+  experienceTitle: "Virginia Today: Industry Explorer", // the VR experience name, shown as the header on the goal card
   goalTitle: "Your Virginia Adventure",
   goalIntro: "Today you will:",
   goalBullets: [
@@ -1088,12 +1089,16 @@ const PORT = {
     "Innovation Thinking: you reached markets around the world.\n" +
     "Problem Solving: you matched each product to the right market.",
   // ---- the round-end FINISH button -> result panel -> RETURN button ----  The student
-  // loads at their own pace; FINISH (lower-right, kept clear of the ship pads) ends the
-  // round and brings up the result. RETURN (same spot, shown WITH the result) lands the
-  // score and fades back to the map. The result card rides the calm panel depth (z~3.3)
-  // the intro uses and draws on top, so it never clips the dock or ships.
-  FINISH_POS: [1.7, 0.9, 3.45] as [number, number, number], FINISH_W: 1.0, FINISH_H: 0.36,
-  RETURN_POS: [1.7, 0.9, 3.45] as [number, number, number], RETURN_W: 1.5, RETURN_H: 0.36,
+  // loads at their own pace; FINISH ends the round and brings up the result. RETURN (same
+  // spot, shown WITH the result) lands the score and fades back to the map. Both sit UP
+  // and to the RIGHT, ABOVE the ship pads and the moving belt: a low button here (the old
+  // y=0.9) sat behind the green berth, so the student's pointing ray caught the belt
+  // containers and the ship tap-pad before ever reaching it and it read as unclickable in
+  // the headset. Lifting them clear of every play interactable in Y fixes that while
+  // staying inside the desktop forward view, and they still draw on top (z~3.3) so they
+  // never clip the dock, ships, or the result card centered below them.
+  FINISH_POS: [1.65, 2.05, 3.3] as [number, number, number], FINISH_W: 1.0, FINISH_H: 0.36,
+  RETURN_POS: [1.65, 2.05, 3.3] as [number, number, number], RETURN_W: 1.2, RETURN_H: 0.36,
   RESULT_POS: [0, 1.9, 3.3] as [number, number, number], RESULT_W: 2.2, // lifted a touch so the taller why-framed card still clears the containers below
   // ---- on-arrival DIRECTIONS (guidance only; mechanic/count/timers are untouched) ----
   // An intro panel + Start button explain the goal, then a short hint follows the play.
@@ -5729,6 +5734,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   // ---- The goal card + the three gold buttons ----
   const goalCard = makeGoalCard(
     ONBOARD_LINES.goalTitle, ONBOARD_LINES.goalIntro, ONBOARD_LINES.goalBullets, ONBOARD.GOAL_W,
+    ONBOARD_LINES.experienceTitle, // the VR experience name, painted as the header atop the card
   );
   goalCard.position.set(ONBOARD.GOAL_POS[0], ONBOARD.GOAL_POS[1], ONBOARD.GOAL_POS[2]);
   (goalCard.material as any).depthTest = false;
