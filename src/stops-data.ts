@@ -1130,6 +1130,16 @@ export const REPORT = {
   SAVE_W: 1.04, SAVE_H: 0.4,
   RETURN_POS: [0.58, 0.74, 5.12] as [number, number, number],
   RETURN_W: 1.04, RETURN_H: 0.4,
+  // Play Again (below the Save/Return row): clears the saved tour and starts fresh.
+  PLAY_AGAIN_POS: [0, 0.34, 5.12] as [number, number, number],
+  PLAY_AGAIN_W: 1.2, PLAY_AGAIN_H: 0.4,
+  // When a meter is below the 3-star line, Fox suggests revisiting the stop that most
+  // raises it (keyed by meter). Fifth-grade, encouraging, no em dashes.
+  REPLAY_HINTS: {
+    economic: "Your Economic Impact still has room to grow. Want to try the Port of Virginia again?",
+    innovation: "Your Innovation Thinking still has room to grow. Want to try the Modern Farm again?",
+    problem: "Your Problem Solving still has room to grow. Want to try the Tech Office again?",
+  } as { [meter: string]: string },
   HOVER_SCALE: 1.06, PRESS_SCALE: 0.95,  // button feedback (matches VISIT.BTN_*)
   TICK_MS: 33,           // loop rate (rAF pauses in the headset)
 

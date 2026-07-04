@@ -4468,6 +4468,32 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const seeReportBtn = makeReportButton("See your Explorer Report", REPORT.SEE_POS, REPORT.SEE_YAW, REPORT.SEE_W, REPORT.SEE_H);
   const reportReturnBtn = makeReportButton("Return to the map", REPORT.RETURN_POS, 0, REPORT.RETURN_W, REPORT.RETURN_H);
   const reportSaveBtn = makeReportButton("Save My Report", REPORT.SAVE_POS, 0, REPORT.SAVE_W, REPORT.SAVE_H);
+  const reportPlayAgainBtn = makeReportButton("Play Again", REPORT.PLAY_AGAIN_POS, 0, REPORT.PLAY_AGAIN_W, REPORT.PLAY_AGAIN_H);
+
+  // Play Again (Phase 4.2): wipe the saved tour and every in-memory total, close the
+  // report, re-lock the map, and run the onboarding from the top for the next student.
+  // finishOnboarding parks the onboarding buttons far off-screen, so restore them.
+  let playAgainWasPressed = false;
+  function playAgain() {
+    clearProgress();
+    for (const id in M6_AWARDS) delete M6_AWARDS[id];
+    for (const s of STOPS) s.done = false;
+    recomputeM6Totals();
+    resetStopPreview();
+    reportOpen = false;
+    savedAwardsToRestore = null;
+    obStartBtn.mesh.position.set(ONBOARD.ADVANCE_POS[0], ONBOARD.ADVANCE_POS[1], ONBOARD.ADVANCE_POS[2]);
+    obNextBtn.mesh.position.set(ONBOARD.ADVANCE_POS[0], ONBOARD.ADVANCE_POS[1], ONBOARD.ADVANCE_POS[2]);
+    obSkipBtn.mesh.position.set(ONBOARD.SKIP_POS[0], ONBOARD.SKIP_POS[1], ONBOARD.SKIP_POS[2]);
+    obContinueBtn.mesh.position.set(ONBOARD.ADVANCE_POS[0], ONBOARD.ADVANCE_POS[1], ONBOARD.ADVANCE_POS[2]);
+    obStartOverBtn.mesh.position.set(ONBOARD.SKIP_POS[0], ONBOARD.SKIP_POS[1], ONBOARD.SKIP_POS[2]);
+    foxHitMesh.position.set(foxX, ONBOARD.FOX_HIT_Y, HUB.ROW_Z);
+    if (foxBubbleMesh) { hubGroup.remove(foxBubbleMesh); foxBubbleMesh = null; } // drop the stale replay nudge
+    currentView = "intro";     // lock the map again until the fresh onboarding opens it
+    startOnboarding();
+    sfxStage();
+    console.log("[M6] play again: progress cleared, onboarding restarted");
+  }
 
   // The report card itself: a canvas-drawn parchment certificate, so the gold
   // stamps and stars render in the headset (a UIKit font atlas would miss those
@@ -4584,6 +4610,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     reportState.titleNote = tier.note;
     reportState.titleShown = false;
     reportState.savedNote = "";
+    // Replay nudge (Phase 4.2): if a meter is below the 3-star line, Fox points to the
+    // stop that most raises the LOWEST one. Encouraging, never required.
+    const lows = [
+      { key: "economic", v: eco }, { key: "innovation", v: inn }, { key: "problem", v: pr },
+    ].filter(function (m) { return m.v < REPORT.STAR3_AT; }).sort(function (a, b) { return a.v - b.v; });
+    setFoxLine(lows.length ? REPORT.REPLAY_HINTS[lows[0].key] : "Amazing work, explorer! You earned three stars all around.");
     revealElapsed = 0;
     reportOpen = true;
     reportCard.draw(reportState);     // first frame: the four stamps + empty meters
@@ -4592,6 +4624,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }
   function closeReport() {
     reportOpen = false;
+    setFoxLine(ONBOARD_LINES.rest);    // Fox drops the replay nudge back to his calm line
     sfxClick();
   }
 
@@ -4677,14 +4710,31 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       } else {
         saveReportWasPressed = !!reportSaveBtn.entity.hasComponent(Pressed);
       }
+
+      // Play Again appears with Save (once the whole report is revealed): a fresh start
+      // for the next student. Gated like the others (hidden Interactables still click).
+      const showPlayAgain = revealElapsed >= REPORT.SAVE_AT_MS;
+      reportPlayAgainBtn.mesh.visible = showPlayAgain;
+      if (showPlayAgain) {
+        const hov = !!reportPlayAgainBtn.entity.hasComponent(Hovered);
+        const prs = !!reportPlayAgainBtn.entity.hasComponent(Pressed);
+        reportPlayAgainBtn.mesh.scale.setScalar(prs ? REPORT.PRESS_SCALE : hov ? REPORT.HOVER_SCALE : 1);
+        if (prs && !playAgainWasPressed) playAgain();
+        playAgainWasPressed = prs;
+      } else {
+        playAgainWasPressed = !!reportPlayAgainBtn.entity.hasComponent(Pressed);
+      }
     } else {
-      // Closed or off the map: hide both card buttons and swallow any carried press.
+      // Closed or off the map: hide the card buttons and swallow any carried press.
       reportReturnBtn.mesh.visible = false;
       reportSaveBtn.mesh.visible = false;
+      reportPlayAgainBtn.mesh.visible = false;
       reportReturnBtn.mesh.scale.setScalar(1);
       reportSaveBtn.mesh.scale.setScalar(1);
+      reportPlayAgainBtn.mesh.scale.setScalar(1);
       returnToMapWasPressed = !!reportReturnBtn.entity.hasComponent(Pressed);
       saveReportWasPressed = !!reportSaveBtn.entity.hasComponent(Pressed);
+      playAgainWasPressed = !!reportPlayAgainBtn.entity.hasComponent(Pressed);
     }
   }, REPORT.TICK_MS);
 
