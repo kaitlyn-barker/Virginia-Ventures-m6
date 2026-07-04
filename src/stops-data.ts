@@ -225,19 +225,26 @@ export type DecisionPack = { setup: string; decisions: Decision[] };
 // Totals accumulate across the four stops, 0..100 per meter; the report gives 3
 // stars at >= 60, 2 stars at >= 60/2, and the top "Virginia Economist" title at an
 // average >= 60. Current numbers, from the audit:
-//   - Decision stops, all strong picks: EI 51 / IN 51 / PS 64 (best possible here).
+//   - Decision stops, all strong picks: EI 52 / IN 52 / PS 62 (best possible here).
 //   - Port strong haul adds up to EI 36 / IN 18 / PS 24 (its caps). Economic Impact
 //     and Innovation lean on the Port to clear 60, so a perfect run needs a real
 //     Port haul (about 4+ correct loads covering all three ships).
-//   - INVARIANTS the audit enforces: a perfect run earns 3 stars on all three
-//     meters + the Economist title; a weak run still earns 1 star everywhere (no
-//     fail). Both hold today.
-//   - TARGET still pending: a typical (mixed) run should reach 2 stars on every
-//     meter. It does not yet, because each question below is binary (one strong
-//     option, two punishing ones). Phase 3.2 fixes this by making two of the three
-//     options defensible with different meter profiles; re-run the audit after.
+// The audit enforces all of these:
+//   - a perfect run earns 3 stars on all three meters + the Economist title;
+//   - a typical (uniform random-pick) run still reaches 2 stars on every meter,
+//     because each question below offers two defensible options with different
+//     meter profiles and at most one weak pick (Phase 3.2);
+//   - a weak run still earns 1 star everywhere (no fail). Keep new options in that
+//     band and re-run `npm run audit:score` after any edit here.
 
 export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
+  // ---- Tech Office, Northern Virginia (decision segment). Three data-center
+  // choices. Each question now offers two defensible options with DIFFERENT meter
+  // profiles (a strong all-around pick and a real tradeoff) plus one weak-but-not-
+  // punishing option, so a thoughtful student is choosing between good ideas, not
+  // spotting the one right answer. No pick fails: weak picks still earn a little.
+  // reaction drives the 3D staging (thrive bright / neutral steady / struggle dim);
+  // the runner and meter math read effects, nothing is hardcoded.
   tech: {
     setup:
       "Welcome to a tech company in Northern Virginia. Make three smart choices to build a data center.",
@@ -247,21 +254,21 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         options: [
           {
             label: "Out in the cheap countryside.",
-            effects: { ei: 3, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Cheap land, but it is far from the internet lines and power, so it runs slow.",
+            effects: { ei: 6, it: 0, ps: 2 },
+            reaction: "neutral",
+            note: "Cheap land saves money, but it sits far from the internet lines and power, so the center runs slower.",
           },
           {
             label: "In Northern Virginia, near the internet lines and lots of power.",
-            effects: { ei: 8, it: 3, ps: 8 },
+            effects: { ei: 8, it: 6, ps: 8 },
             reaction: "thrive",
-            note: "Great spot. The internet lines and plenty of power are right here, so it runs fast.",
+            note: "This is why tech clusters here. The internet lines and plenty of power are right nearby, so it runs fast.",
           },
           {
             label: "Downtown, with no spare power.",
-            effects: { ei: 0, it: 0, ps: -5 },
+            effects: { ei: 2, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "No room or spare power downtown, so it cannot grow.",
+            note: "Downtown has no spare room or power, so the center cannot grow.",
           },
         ],
       },
@@ -269,22 +276,22 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         question: "How will you power it?",
         options: [
           {
-            label: "Use only the power already there.",
-            effects: { ei: 0, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Not enough power on its own. It could overload.",
+            label: "Rely on the strong, steady power grid.",
+            effects: { ei: 6, it: 0, ps: 8 },
+            reaction: "neutral",
+            note: "A steady grid keeps it reliable and costs less, though it misses the chance to use cleaner energy.",
           },
           {
-            label: "Build a strong, reliable supply and add solar panels.",
-            effects: { ei: 0, it: 8, ps: 8 },
+            label: "Build a strong supply and add solar panels.",
+            effects: { ei: 3, it: 8, ps: 8 },
             reaction: "thrive",
-            note: "Steady power, and the solar panels are a smart, modern touch.",
+            note: "Steady power plus solar is a smart, modern choice, though the panels cost a little more to add.",
           },
           {
             label: "Buy the cheapest power, even if it cuts out.",
-            effects: { ei: 3, it: 0, ps: -5 },
+            effects: { ei: 3, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "It saves money, but the power cuts out and the center stops.",
+            note: "The cheapest power saves money, but it cuts out and the whole center stops.",
           },
         ],
       },
@@ -295,29 +302,29 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
             label: "Hire local workers and connect to the fast internet lines.",
             effects: { ei: 8, it: 0, ps: 8 },
             reaction: "thrive",
-            note: "New jobs for local workers, and the fast connection keeps it running.",
+            note: "New jobs for local workers, and the fast connection keeps every computer running.",
           },
           {
-            label: "Run it with as few people as possible.",
-            effects: { ei: 3, it: -3, ps: 0 },
+            label: "Run it lean with smart software.",
+            effects: { ei: 2, it: 7, ps: 6 },
             reaction: "neutral",
-            note: "It saves money, but it creates very few jobs.",
+            note: "Smart software makes it efficient and modern, but it creates fewer local jobs.",
           },
           {
             label: "Use a slow, cheap connection.",
-            effects: { ei: 0, it: 0, ps: -5 },
+            effects: { ei: 2, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "The slow connection cannot keep up with all the computers.",
+            note: "A slow connection saves money, but it cannot keep up with all the computers.",
           },
         ],
       },
     ],
   },
 
-  // ---- Tourism Hub, Colonial Williamsburg (decision segment). Same shape as Tech:
-  // price the tickets, bring visitors in, then balance crowds against protecting the
-  // old buildings. Strong picks thrive, weak picks struggle, the safe-but-quiet pick
-  // is neutral. The reusable runner and the meter math read this; nothing hardcoded.
+  // ---- Tourism Hub, Colonial Williamsburg (decision segment). The pricing question
+  // is the model for the whole module: every option is a real tradeoff. Two defensible
+  // options per question with different profiles, at most one weak pick, and no pick
+  // fails. reaction drives the staging; effects feed the shared runner and meters.
   tourism: {
     setup:
       "Welcome to historic Colonial Williamsburg. Make three choices to welcome visitors and protect the site.",
@@ -327,21 +334,21 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         options: [
           {
             label: "Make them free.",
-            effects: { ei: 3, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Big happy crowds come, but with no ticket money you cannot keep the old buildings repaired.",
+            effects: { ei: 6, it: 0, ps: 0 },
+            reaction: "neutral",
+            note: "Free tickets bring big, happy crowds, but with no ticket money it is harder to keep the old buildings repaired.",
           },
           {
             label: "Set a fair price.",
             effects: { ei: 8, it: 0, ps: 8 },
             reaction: "thrive",
-            note: "Plenty of visitors still come, and you earn enough to keep the site beautiful.",
+            note: "Plenty of visitors still come, and the ticket money keeps the historic site beautiful.",
           },
           {
             label: "Charge a very high price.",
-            effects: { ei: 3, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Each ticket earns a lot, but few people can afford to come and the town feels left out.",
+            effects: { ei: 6, it: 0, ps: 3 },
+            reaction: "neutral",
+            note: "A high price earns a lot per ticket and keeps crowds small, but fewer families can afford to visit.",
           },
         ],
       },
@@ -350,21 +357,21 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         options: [
           {
             label: "Do nothing and hope they show up.",
-            effects: { ei: 0, it: 0, ps: -5 },
+            effects: { ei: 2, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "Almost no one finds the site.",
+            note: "Waiting for visitors to find the site on their own brings very few.",
           },
           {
             label: "Share the real history and hands-on experiences.",
             effects: { ei: 8, it: 8, ps: 0 },
             reaction: "thrive",
-            note: "People travel from far away for something authentic.",
+            note: "People travel from far away for real, hands-on history they cannot get anywhere else.",
           },
           {
-            label: "Build flashy fake attractions that ignore the real history.",
-            effects: { ei: 3, it: -5, ps: 0 },
-            reaction: "struggle",
-            note: "A crowd comes, but it cheapens what makes the place special.",
+            label: "Build flashy modern attractions instead.",
+            effects: { ei: 6, it: 0, ps: 0 },
+            reaction: "neutral",
+            note: "Flashy attractions pull a quick crowd, but they cover up the real history people came to see.",
           },
         ],
       },
@@ -373,32 +380,31 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         options: [
           {
             label: "Let in huge crowds with no limits.",
-            effects: { ei: 8, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Lots of money today, but the historic buildings get worn and damaged.",
+            effects: { ei: 8, it: 0, ps: 0 },
+            reaction: "neutral",
+            note: "Huge crowds bring in a lot of money today, but with no limits the historic buildings get worn and damaged.",
           },
           {
             label: "Set smart limits and protect the buildings.",
-            effects: { ei: 8, it: 8, ps: 8 },
+            effects: { ei: 6, it: 6, ps: 8 },
             reaction: "thrive",
-            note: "Steady visitors, and the site stays beautiful for years to come.",
+            note: "Steady visitors, and smart limits keep the site beautiful for years to come.",
           },
           {
             label: "Close off most of the site to be safe.",
-            effects: { ei: -5, it: 0, ps: 3 },
-            reaction: "neutral",
-            note: "The buildings are protected, but visitors leave disappointed and you make very little.",
+            effects: { ei: 0, it: 0, ps: 4 },
+            reaction: "struggle",
+            note: "Closing off most of the site keeps it very safe, but visitors leave disappointed and you earn very little.",
           },
         ],
       },
     ],
   },
 
-  // ---- Modern Farm, Shenandoah Valley (decision segment). Same shape as the others:
-  // plant the crops, decide how to water them, then bring in and sell the harvest.
-  // Farming did not disappear in Virginia, it got smarter; the strong picks use new
-  // technology and THRIVE, the old wasteful ways STRUGGLE, and the small local choice
-  // is NEUTRAL. The reusable runner and the meter math read this; nothing hardcoded.
+  // ---- Modern Farm, Shenandoah Valley (decision segment). Farming did not disappear
+  // in Virginia, it got smarter. Each question pits a modern, tech-forward pick against
+  // a simpler, cheaper one with a different profile, plus one weak-but-not-punishing
+  // option. reaction drives the staging; effects feed the shared runner and meters.
   farm: {
     setup:
       "Welcome to a modern farm in the Shenandoah Valley. Make three choices to grow a great harvest with new technology.",
@@ -407,10 +413,10 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         question: "How will you plant your crops?",
         options: [
           {
-            label: "Plant by hand the old way, guessing where the seeds go.",
-            effects: { ei: 3, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "It works, but seeds get wasted and the rows come out uneven.",
+            label: "Plant by hand the old way.",
+            effects: { ei: 4, it: 0, ps: 2 },
+            reaction: "neutral",
+            note: "Planting by hand costs little, but seeds get wasted and the rows come out uneven.",
           },
           {
             label: "Use a GPS-guided tractor to plant in perfect rows.",
@@ -420,9 +426,9 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
           },
           {
             label: "Pack in way too many seeds to be safe.",
-            effects: { ei: 3, it: 0, ps: -5 },
+            effects: { ei: 3, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "Nothing is wasted, but the crowded plants choke each other.",
+            note: "Packing in extra seed wastes nothing, but the crowded plants choke each other.",
           },
         ],
       },
@@ -430,22 +436,22 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         question: "How will you know when the crops need water?",
         options: [
           {
-            label: "Water the whole field the same every day, just in case.",
-            effects: { ei: 0, it: 0, ps: -5 },
-            reaction: "struggle",
-            note: "Simple, but you waste a lot of water on parts that do not need it.",
+            label: "Water the whole field the same every day.",
+            effects: { ei: 2, it: 0, ps: 3 },
+            reaction: "neutral",
+            note: "Watering everything every day keeps crops alive, but it wastes a lot of water.",
           },
           {
             label: "Fly a sensor drone to find the dry spots, then water only those.",
             effects: { ei: 0, it: 8, ps: 8 },
             reaction: "thrive",
-            note: "You save water and the crops stay healthy.",
+            note: "You water only the dry spots, so you save water and the crops stay healthy.",
           },
           {
             label: "Only water once plants already look like they are wilting.",
-            effects: { ei: 0, it: 0, ps: -5 },
+            effects: { ei: 2, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "You save water at first, but by then the crops are hurt.",
+            note: "Waiting until plants wilt saves water at first, but by then the crops are already hurt.",
           },
         ],
       },
@@ -453,22 +459,22 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
         question: "How will you bring in the harvest and sell it?",
         options: [
           {
-            label: "Harvest slowly by hand and sell only at the local stand.",
-            effects: { ei: 3, it: -5, ps: 0 },
+            label: "Harvest by hand and sell at the local stand.",
+            effects: { ei: 4, it: 0, ps: 4 },
             reaction: "neutral",
-            note: "A lot of work, and you reach only a few local buyers.",
+            note: "Selling at the local stand builds close ties to your town, but by hand you reach only a few buyers.",
           },
           {
             label: "Use modern machines to harvest and sell to buyers across the country.",
-            effects: { ei: 8, it: 8, ps: 8 },
+            effects: { ei: 8, it: 8, ps: 6 },
             reaction: "thrive",
-            note: "A big harvest, and you reach far more customers.",
+            note: "A big harvest, and modern machines let you reach far more customers.",
           },
           {
             label: "Rush the harvest with machines but skip checking the crops.",
-            effects: { ei: 3, it: 0, ps: -5 },
+            effects: { ei: 3, it: 0, ps: 0 },
             reaction: "struggle",
-            note: "Fast, but you ship bruised, low-quality produce.",
+            note: "Fast, but skipping quality checks ships bruised, low-quality produce.",
           },
         ],
       },

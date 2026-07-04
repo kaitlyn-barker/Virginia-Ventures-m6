@@ -108,19 +108,14 @@ console.log("INVARIANTS (enforced):");
 check(perfect.s.economic === 3 && perfect.s.innovation === 3 && perfect.s.problem === 3, "(a) a perfect run earns 3 stars on all three meters");
 check(perfect.avg >= REPORT.STAR3_AT, `(a) a perfect run earns the top title (avg ${Math.round(perfect.avg)} >= ${REPORT.STAR3_AT} = Virginia Economist)`);
 check(perfectMinPort.s.economic === 3 && perfectMinPort.s.innovation === 3 && perfectMinPort.s.problem === 3, "(a') aced decisions + a modest 4-load Port still reaches 3 stars everywhere");
+// (b) TYPICAL RUN. "typical" is a uniform-random pick across all options per
+// question (a pessimistic proxy: it assumes the student is as likely to pick the
+// weak option as a good one). Phase 3.2 made every question offer two defensible
+// options with different meter profiles and at most one weak pick, so even this
+// random run now reaches 2 stars everywhere. Enforced so it cannot regress.
+check(typical.s.economic >= 2 && typical.s.innovation >= 2 && typical.s.problem >= 2, "(b) a typical (random-pick) run lands at 2 stars or better on every meter");
 check(weak.s.economic >= 1 && weak.s.innovation >= 1 && weak.s.problem >= 1, "(c) a weak run still earns at least 1 star on every meter (no-fail)");
 check(REPORT.TITLES[REPORT.TITLES.length - 1].at <= 0, "(c) the lowest title tier is reachable by any run (all tiers encouraging)");
 
-// --- TARGET (Phase 3.2 acceptance test; informational until the options are
-// redesigned). "typical" here is a uniform-random pick across all options per
-// question. It fails today ONLY because each question is binary (one strong
-// option, two punishing ones), so a random pick averages low. Phase 3.2 makes
-// two of three options defensible with different meter profiles and at most one
-// weak; once it does, this same uniform-random typical run should reach 2 stars.
-const typicalOk = typical.s.economic >= 2 && typical.s.innovation >= 2 && typical.s.problem >= 2;
-console.log("\nTARGET (Phase 3.2, not enforced yet):");
-console.log(`${typicalOk ? "met:    " : "PENDING:"} (b) a typical (random-pick) run lands at 2 stars or better on every meter` +
-  (typicalOk ? "" : `  [today EI${typical.s.economic}/IN${typical.s.innovation}/PS${typical.s.problem}: blocked on the binary-option redesign]`));
-
-console.log(`\n${failures === 0 ? "INVARIANTS PASSED" : failures + " INVARIANT(S) FAILED"}${typicalOk ? "" : "  (typical-run target still pending Phase 3.2)"}`);
+console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exit(failures === 0 ? 0 : 1);
