@@ -28,7 +28,6 @@ import {
   DoubleSide,
   Vector3,
 } from "@iwsdk/core";
-import { ShopId, SHOPS } from "./shops";
 
 // ----------------------------------------------------------------------------
 // PALETTE  —  the WORLD colors (warm and naturalistic). The cream/navy/gold of
@@ -1521,86 +1520,6 @@ function buildOkaforFigure(): Group {
 
 // Build Gus, his cart, his gold "!", and his greeting bubble, then keep an eye
 // on how close the player is and show the right thing.
-function buildGus(world: any, shop: ShopId) {
-  const GREETING = SHOPS[shop].ownerGreeting;
-  const RADIUS = 4.2; // how close you must be for Gus to greet you
-
-  // The owner figure, chosen by shop. Each is built at its own local origin and
-  // then placed at GUS_SPOT below, just behind the counter, facing the room (+z).
-  let gus: Group;
-  if (shop === "surf") gus = buildReyesFigure();
-  else if (shop === "repair") gus = buildOkaforFigure();
-  else gus = buildDeliaFigure();
-
-  // ---- The gold "!" that invites you over ----
-  const bang = new Group();
-  const barG = meshBox(0.1, 0.4, 0.1, "#c8962a");
-  barG.position.set(0, 0.26, 0);
-  bang.add(barG);
-  const dotG = meshBox(0.1, 0.1, 0.1, "#c8962a");
-  dotG.position.set(0, -0.02, 0);
-  bang.add(dotG);
-  bang.position.set(0, 2.7, 0);
-  gus.add(bang);
-
-  // Place Gus behind the counter.
-  const gusE = world.createTransformEntity(gus);
-  gusE.object3D!.position.set(GUS_SPOT.x, 0, GUS_SPOT.z);
-  gusE.object3D!.rotation.y = GUS_SPOT.faceY;
-
-  // ---- The greeting bubble. Parked over Gus's head it ran off the TOP of the
-  // screen up close (eye height is ~1.6, the bubble sat at 3.1), so you could not
-  // read it. Instead it floats in front of you, a little above eye level so it
-  // still reads as Gus speaking from above, always faces you, and draws ON TOP so
-  // his cart and awning never cover it. depthTest off + a high renderOrder keep
-  // it over the world. ----
-  const bubbleMat = new MeshBasicMaterial({
-    map: makeBubbleTexture(GREETING),
-    transparent: true,
-    side: DoubleSide,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const bubble = new Mesh(new PlaneGeometry(2.3, 1.2), bubbleMat);
-  bubble.renderOrder = 2000;
-  const bubbleE = world.createTransformEntity(bubble);
-  bubbleE.object3D!.position.set(GUS_SPOT.x, 3.1, GUS_SPOT.z);
-  bubbleE.object3D!.visible = false;
-
-  // ---- Watch how close the player is. Far out, Gus waves you over with the "!".
-  // In the greeting band the bubble floats readably in front of you. Once you are
-  // close enough for his question panel, the greeting steps aside for it. ----
-  const GREET_FAR = RADIUS;  // start greeting at this range
-  const GREET_NEAR = 3.0;    // inside here the question panel takes over (matches it)
-  const GREET_DIST = 3.7;    // how far ahead of you the bubble floats (readable size)
-  const GREET_RAISE = 0.22;  // just above eye level, so it still reads as "up" but stays on screen
-  const camPos = new Vector3();
-  const bubbleFwd = new Vector3();
-  let t = 0;
-  setInterval(function () {
-    t = t + 1;
-    const cam = world.camera;
-    if (!cam) return;
-    cam.getWorldPosition(camPos);
-    const dx = camPos.x - GUS_SPOT.x;
-    const dz = camPos.z - GUS_SPOT.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    const showGreeting = dist <= GREET_FAR && dist > GREET_NEAR;
-    bubbleE.object3D!.visible = showGreeting;
-    bang.visible = dist > GREET_FAR;
-    bang.position.y = 2.7 + Math.sin(t * 0.12) * 0.08;
-    if (showGreeting) {
-      cam.getWorldDirection(bubbleFwd);
-      bubbleFwd.y = 0;
-      if (bubbleFwd.lengthSq() < 1e-6) bubbleFwd.set(0, 0, -1);
-      bubbleFwd.normalize();
-      const px = camPos.x + bubbleFwd.x * GREET_DIST;
-      const pz = camPos.z + bubbleFwd.z * GREET_DIST;
-      bubbleE.object3D!.position.set(px, camPos.y + GREET_RAISE, pz);
-      bubbleE.object3D!.rotation.set(0, Math.atan2(camPos.x - px, camPos.z - pz), 0, "YXZ");
-    }
-  }, 33);
-}
 
 // ============================================================================
 // SHOP FURNITURE  —  the two fixtures the panels anchor to. The sales counter
@@ -2030,36 +1949,9 @@ export function buildBaseWorld(world: any) {
   buildSkyAndLights(world);
   const ground = buildShopFloor(world);
   const boundary = buildShopWalls(world);
-  const street = buildStreetView(world);
-  return { ground, boundary, street };
+  return { ground, boundary };
 }
 
-// ----------------------------------------------------------------------------
-// recolorShop  —  repaint the captured shell materials for the chosen shop. The
-// bakery keeps its default cream-and-rose look; surf gets a sandy checker floor
-// and ocean-blue walls. Reuses the same materials, so nothing is rebuilt.
-// ----------------------------------------------------------------------------
-function recolorShop(shop: ShopId) {
-  if (shop === "surf") {
-    if (_floorMat) {
-      const old = _floorMat.map;
-      _floorMat.map = makeCheckerTexture(PALETTE.surfSand1, PALETTE.surfSand2);
-      _floorMat.needsUpdate = true;
-      if (old) old.dispose();
-    }
-    for (const m of _wallMats) m.color.set(PALETTE.surfWall);
-    for (const m of _wainscotMats) m.color.set(PALETTE.surfWainscot);
-  } else if (shop === "repair") {
-    if (_floorMat) {
-      const old = _floorMat.map;
-      _floorMat.map = makeCheckerTexture(PALETTE.repairFloor1, PALETTE.repairFloor2);
-      _floorMat.needsUpdate = true;
-      if (old) old.dispose();
-    }
-    for (const m of _wallMats) m.color.set(PALETTE.repairWall);
-    for (const m of _wainscotMats) m.color.set(PALETTE.repairWainscot);
-  }
-}
 
 // ----------------------------------------------------------------------------
 // buildShopProps  —  the parts that change per shop: the storefront sign, the
@@ -2399,33 +2291,3 @@ function buildRepairScenery(world: any) {
   place(plant(), 4.4, -5.6, 0);
 }
 
-export function buildShopProps(world: any, shop: ShopId) {
-  recolorShop(shop);
-  buildStorefrontSign(world, SHOPS[shop].shopName);
-  if (shop === "surf") {
-    buildSurfCounter(world);
-    buildSurfShelf(world);
-    buildSurfScenery(world);
-  } else if (shop === "repair") {
-    buildRepairCounter(world);
-    buildRepairShelf(world);
-    buildRepairScenery(world);
-  } else {
-    buildSalesCounter(world);
-    buildDisplayShelf(world);
-    buildBakeryScenery(world);
-  }
-  buildGus(world, shop);
-}
-
-// ----------------------------------------------------------------------------
-// buildEnvironment  —  kept so index.ts still works unchanged for now. It builds
-// the shell and then the bakery props, exactly like before, and returns the same
-// { ground, boundary }. The next stage switches index.ts over to call the two
-// helpers directly so the props can wait until a shop is picked.
-// ----------------------------------------------------------------------------
-export function buildEnvironment(world: any) {
-  const base = buildBaseWorld(world);
-  buildShopProps(world, "bakery");
-  return base;
-}
