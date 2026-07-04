@@ -42,6 +42,8 @@ import {
   SRGBColorSpace,
   RepeatWrapping,
   DoubleSide,
+  SlideSystem,
+  TurnSystem,
 } from "@iwsdk/core";
 
 import { buildBaseWorld } from "./environment";
@@ -68,15 +70,26 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     features: { handTracking: { required: false }, layers: { required: false } },
   },
   features: {
-    // initialPlayerPosition spawns the player RIG (the locomotion collision
-    // capsule) on the entrance side of the plaza. The camera below sits at
-    // local z 0, so the capsule lines up with where you actually appear to
-    // stand — that is what makes the hedge boundary stop you in the right place.
-    // useWorker is OFF on purpose: the worker only syncs world.player back to the
-    // app after the first move, so with it on the spawn would sit at the origin
-    // and snap forward on the first keypress. On the main thread the initial
-    // position applies immediately. The scene is light, so there is no cost.
-    locomotion: { useWorker: false, browserControls: true, initialPlayerPosition: [0, 0, 7] },
+    // NO ARTIFICIAL LOCOMOTION (VR comfort, non-negotiable, these are kids). The
+    // experience is built for a student who STANDS at the fixed spawn and points,
+    // so browserControls is off (no desktop first-person keys) and the actual
+    // thumbstick slide + snap turn are zeroed just after the world is ready, in the
+    // "lock down locomotion" loop below. The feature config here does not expose
+    // slidingSpeed/turningAngle, so that has to happen on the SlideSystem/TurnSystem
+    // themselves. The desktop preview still steers with mouse-look (browserLookLoop)
+    // and the wider desktop fov (desktopFovLoop) frames every interactable, so no
+    // walking is needed either.
+    //
+    // The locomotion feature stays ON for the two things it still owns:
+    // initialPlayerPosition spawns the player RIG at the entrance side (z +7), so
+    // the collision capsule lines up with the camera (local z 0) and the hedge
+    // boundary stops in the right place; and useWorker is OFF so that spawn applies
+    // immediately on the main thread instead of snapping forward from the origin.
+    locomotion: {
+      useWorker: false,
+      browserControls: false,
+      initialPlayerPosition: [0, 0, 7],
+    },
     grabbing: true,
     physics: true,
     sceneUnderstanding: false,
@@ -174,6 +187,24 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   }
   setInterval(desktopFovLoop, 33);
   desktopFovLoop(); // frame the very first desktop frame wide, before the first tick
+
+  // --------------------------------------------------------------------------
+  // LOCK DOWN LOCOMOTION  —  enforce the no-artificial-movement comfort rule.
+  // The locomotion feature is kept for the spawn + hedge boundary (see the World
+  // config above), but the World-level config does not expose the slide speed or
+  // the turn angle, so we zero them on the SlideSystem and TurnSystem directly.
+  // Those two systems are registered ASYNC (the Locomotor initializes off the
+  // main path), and their reactive config only forwards FUTURE changes, so we
+  // poll until both exist, set maxSpeed and turningAngle to 0, then stop. After
+  // this the thumbstick cannot slide the student and cannot snap-turn the view,
+  // so a stray nudge can never move a kid or spin them away from the scene.
+  const lockLocomotion = setInterval(function () {
+    const slide = world.getSystem(SlideSystem);
+    const turn = world.getSystem(TurnSystem);
+    if (slide) slide.config.maxSpeed.value = 0;       // no thumbstick / WASD slide
+    if (turn) turn.config.turningAngle.value = 0;      // snap turn rotates nothing
+    if (slide && turn) clearInterval(lockLocomotion);
+  }, 50);
 
   // --------------------------------------------------------------------------
   // HIDDEN-PANEL CLICK GUARD
