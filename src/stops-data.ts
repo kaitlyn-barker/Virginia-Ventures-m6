@@ -92,7 +92,7 @@ export const STOPS = [
     name: "Tech Office",
     title: "Tech Office, Northern Virginia",
     region: "Northern Virginia",
-    tagline: "Where the internet lives",
+    tagline: "Where tech and defense cluster",
     landmark: "Data Center",
     color: "#3f9fd0",   // tech blue
     done: false,        // earned by actually finishing the stop
@@ -247,7 +247,7 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
   // the runner and meter math read effects, nothing is hardcoded.
   tech: {
     setup:
-      "Welcome to a tech company in Northern Virginia. Make three smart choices to build a data center.",
+      "A tech company in Northern Virginia, next to Washington, D.C. Nearby are companies that help defend the country. Make three smart choices.",
     decisions: [
       {
         question: "Where should we build it?",
@@ -262,7 +262,7 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
             label: "In Northern Virginia, near the internet lines and lots of power.",
             effects: { ei: 8, it: 6, ps: 8 },
             reaction: "thrive",
-            note: "This is why tech clusters here. The internet lines and plenty of power are right nearby, so it runs fast.",
+            note: "This is why tech clusters here by D.C.: fast internet, plenty of power, and government and defense customers all close by.",
           },
           {
             label: "Downtown, with no spare power.",
