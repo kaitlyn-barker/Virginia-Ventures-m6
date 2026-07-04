@@ -777,6 +777,25 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     console.log("[M6] finished " + stopId + " with award", award, "=> totals", m6Totals);
   }
 
+  // The current stop's IN-PROGRESS contribution to the three meters, updated live as
+  // the student picks (decision stops) or loads containers (Port), reset on entering a
+  // stop. The in-stop meter (below) previews m6Totals with the active stop's committed
+  // award swapped for this, so the bars move mid-stop instead of only at the hub.
+  const stopPreview = { economic: 0, innovation: 0, problem: 0 };
+  function resetStopPreview() { stopPreview.economic = 0; stopPreview.innovation = 0; stopPreview.problem = 0; }
+  function previewTotals() {
+    let ec = 0, inn = 0, pr = 0;
+    for (const id in M6_AWARDS) {
+      if (id === activeStopId) continue; // the live preview replaces this stop's committed award
+      ec += M6_AWARDS[id].economic; inn += M6_AWARDS[id].innovation; pr += M6_AWARDS[id].problem;
+    }
+    return {
+      economic: Math.max(0, Math.min(100, ec + stopPreview.economic)),
+      innovation: Math.max(0, Math.min(100, inn + stopPreview.innovation)),
+      problem: Math.max(0, Math.min(100, pr + stopPreview.problem)),
+    };
+  }
+
   // ---- THE TRAVEL FADE ----  A solid quad that rides just in front of the camera,
   // square to the view, whose opacity we animate on setInterval. At full cover we
   // swap the world (onCover); when clear again we settle the view state (onDone).
@@ -951,6 +970,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     currentView = "fading";
     activeStopId = stopId;
     pendingAward = null;                 // a fresh visit; the runner sets the real award
+    resetStopPreview();                  // the in-stop meter starts from this stop's committed award
     sfxStage();                          // a soft travel cue
     startFade(
       function onCover() { hideHub(); showStop(stop); },
@@ -3465,6 +3485,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         counts[ct.key] = (counts[ct.key] || 0) + 1;
         sh.pulse = 1;                      // the ship glows gold, eased down in tick
         drawCounts();
+        const pa = computeAward();         // feed the in-stop meter so its bars grow with each load
+        stopPreview.economic = pa.ei; stopPreview.innovation = pa.it; stopPreview.problem = pa.ps;
         showFact(ct.product);              // the teaching layer: a brief why-fact for this product
         park(ct);                          // it snaps aboard and is gone from the dock...
         ct.state = "loaded"; ct.timer = PORT.REFILL_MS; // ...and a fresh one refills the slot shortly
@@ -3884,6 +3906,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     runnerTally.ei += opt.effects.ei;
     runnerTally.it += opt.effects.it;
     runnerTally.ps += opt.effects.ps;
+    // Feed the in-stop meter so its bars move with this pick (not just at the hub).
+    stopPreview.economic = runnerTally.ei; stopPreview.innovation = runnerTally.it; stopPreview.problem = runnerTally.ps;
     // Assemble the matching build piece in the scene and let it react to this pick.
     // (The meter math above and the color-coded readout below are unchanged.)
     const staging = runnerStop ? stopStagings[runnerStop.id] : null;
@@ -4044,6 +4068,59 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     pushHubMeter("innovation", "hub-fill-innovation", "hub-val-innovation");
     pushHubMeter("problem", "hub-fill-problem", "hub-val-problem");
   }, HUB_METERS.TICK_MS);
+
+  // ======================================================================
+  // IN-STOP RUNNING METERS  —  the same three-bar panel, shown INSIDE a stop so
+  // the student sees their totals fill as they play, not only back at the map.
+  // It reads previewTotals() (committed award from the other stops + this stop's
+  // live in-progress contribution), so a pick or a correct load visibly moves the
+  // bars. It reuses ui/hub-meters.json (a second document; ids are scoped per
+  // panel), sits off to the upper LEFT at kid height so it never covers the
+  // question, cards, buttons, or the Port play area, and rides currentView.
+  // setInterval only (rAF pauses in the headset).
+  // ======================================================================
+  const IN_STOP_METERS = {
+    POS: [-1.72, 2.34, 3.55] as [number, number, number], // upper-left, clear of the centered panels
+    YAW: 0.5,            // radians; turn the card to face the student
+    MAXW: 0.9, MAXH: 0.72,
+    TRACK: 68,           // must match the .track width in ui/hub-meters.uikitml
+    EASE: 0.18,          // eases toward the live target each tick
+    TICK_MS: 33,
+  };
+  const inStopPanel = world
+    .createTransformEntity()
+    .addComponent(PanelUI, { config: "./ui/hub-meters.json", maxWidth: IN_STOP_METERS.MAXW, maxHeight: IN_STOP_METERS.MAXH });
+  inStopPanel.object3D!.position.set(IN_STOP_METERS.POS[0], IN_STOP_METERS.POS[1], IN_STOP_METERS.POS[2]);
+  inStopPanel.object3D!.rotation.set(0, IN_STOP_METERS.YAW, 0, "YXZ");
+  inStopPanel.object3D!.visible = false;
+  let inStopDoc: any = null;
+  whenPanelReady(inStopPanel, function (doc) { inStopDoc = doc; });
+
+  const inStopShown = { economic: 0, innovation: 0, problem: 0 };
+  const inStopLast = { economic: -1, innovation: -1, problem: -1 };
+  function pushInStopMeter(key: "economic" | "innovation" | "problem", fillId: string, valId: string) {
+    const rounded = Math.round(inStopShown[key]);
+    if (rounded === inStopLast[key]) return;
+    inStopLast[key] = rounded;
+    const f = inStopDoc.getElementById(fillId);
+    if (f) f.setProperties({ width: (IN_STOP_METERS.TRACK * inStopShown[key]) / 100 });
+    const v = inStopDoc.getElementById(valId);
+    if (v) v.setProperties({ text: String(rounded) });
+  }
+  setInterval(function () {
+    const inStop = currentView === "stop";
+    if (inStopPanel.object3D) inStopPanel.object3D.visible = inStop;
+    if (!inStopDoc || !inStop) return;   // only animate while standing in a stop
+    const target = previewTotals();
+    let k: "economic" | "innovation" | "problem";
+    for (k of ["economic", "innovation", "problem"] as const) {
+      if (Math.abs(target[k] - inStopShown[k]) < 0.5) inStopShown[k] = target[k];
+      else inStopShown[k] += (target[k] - inStopShown[k]) * IN_STOP_METERS.EASE;
+    }
+    pushInStopMeter("economic", "hub-fill-economic", "hub-val-economic");
+    pushInStopMeter("innovation", "hub-fill-innovation", "hub-val-innovation");
+    pushInStopMeter("problem", "hub-fill-problem", "hub-val-problem");
+  }, IN_STOP_METERS.TICK_MS);
 
   // ======================================================================
   // OPENING ONBOARDING  —  the welcome + one-control tutorial that plays before
