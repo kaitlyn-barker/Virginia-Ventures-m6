@@ -30,7 +30,16 @@ All tuning for how each choice moves these lives in the CONSTANTS block.
 - The report card system. Keep the existing element ids so the bar-filling logic keeps working. Reskin only.
 - The visible-consequences readouts: color-coded per-meter change, green for gains, red for drops. Reuse for every stop's result.
 - The 3D primitive helpers meshBox, meshCyl, meshSphere for all in-headset visuals.
-- The STATIONS position pattern and the setInterval follow loop.
+- The setInterval follow-loop pattern for anything that must track the view.
+
+Note: the Module 8 "Money Moves" carcass has been removed (the HUD, the phase machine, the shop system, shops.ts, and 15 dead UI panels are gone; the dead audio and GLTF assets are gone too). A few Module 8 shop-builder functions remain uncalled and inert in environment.ts, pending a focused sweep.
+
+## File map (current source layout)
+- src/index.ts — the experience shell and all runtime logic, inside one World.create callback: the world/spawn, onboarding, hub + visit loop, the shared decision runner, the Port mini-game, and the Explorer Report reveal. This is "the shell."
+- src/stops-data.ts — all tunable DATA and copy (pure data, no world/scene refs): HUB, STOPS, ONBOARD/ONBOARD_LINES, DECISION_PACKS, the per-stop staging and backdrop tuning, the PORT mini-game config, and the REPORT copy. Adding or tuning a stop should mean editing this file. This is "the data."
+- src/environment.ts — the base world (sky, light, floor, boundary) plus the shared in-headset visual helpers: the mesh primitives and the canvas card builders (title, text, button, choice, info, goal, readout, speech bubble, Explorer Report card).
+- src/sfx.ts — synthesized WebAudio cues and the per-stop ambient beds (no audio files).
+- A deeper split of index.ts into per-feature logic modules (hub / runner / port / report / onboarding) would require refactoring the single World.create closure into injected functions; it is deferred so it does not risk the working experience.
 
 ## Content-pack architecture (this is how we stay fast)
 Build the stop shell once: arrive, Fox intro line, run the challenge, show the result, return to the map, add the score. Each of the four stops is then DATA: its name, props, Fox line, and challenge config. Three stops share the decision-segment grammar; the Port is the one custom mechanic. Adding or tuning a stop should mean editing data, not the shell.
