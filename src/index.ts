@@ -1,14 +1,23 @@
 // ============================================================================
-// Money Moves: Your Financial Literacy
-// FOUNDATION SHELL  —  rebuilt to match the Market Harvest (m4) house style.
-// This file sets up:
-//   1. The economic CONSTANTS (kept; the stages will read these)
-//   2. The house colors (cream / navy / gold / green)
-//   3. The three score meters and the HUD that shows them
-//   4. The IWSDK world: a walkable, lit space, with mouse-look + WASD/thumbstick
-//   5. The hidden-panel click guard and a press helper (needed once panels exist)
-//   6. The phase machine skeleton (Select -> Morning -> Midday -> Afternoon -> Close)
-// The stations, the mentor, the panels, and the stage logic arrive in later prompts.
+// Virginia Today: Industry Explorer  (Virginia Ventures, Module 6)
+// The 5th-grade WebXR tour of modern Virginia's economy, hosted by Foreman Fox.
+// A hub-and-spoke experience: the student stands at a Virginia map and picks
+// four stops in any order, then reads an Explorer Report of how they did.
+// This file sets up, top to bottom:
+//   1. The CONSTANTS blocks: HUB, STOPS, ONBOARD, per-stop staging/scene tuning,
+//      the PORT mini-game config, and the REPORT copy (all tunable in one place)
+//   2. The IWSDK world and the standing spawn (no artificial locomotion)
+//   3. The opening onboarding: goal card, Fox control tutorial, and the map gate
+//   4. The hub: Fox plus four landmark pedestals, point-to-travel, gold stamps,
+//      and the running hub-meters panel (Economic Impact / Innovation / Problem)
+//   5. The shared decision runner used by three stops (Tech, Tourism, Farm),
+//      each stop supplied as data (Fox line, decisions, staging, backdrop)
+//   6. The Port of Virginia mini-game: the one custom mechanic (load containers
+//      onto the matching ship), with its own scoring, directions, and finish flow
+//   7. The Explorer Report: four stamps, staged meter reveal with stars, a
+//      Virginia title, and a printable teacher page
+// The 3D primitive/card helpers and the base world live in src/environment.ts;
+// the fileless WebAudio cues live in src/sfx.ts.
 // ============================================================================
 
 import {
@@ -1254,9 +1263,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // --------------------------------------------------------------------------
   // PANEL PRESENTATION
-  // The story panels are anchored in the world, near Gus or a building. But the
+  // A panel is anchored in the world, near Fox or a building. But the
   // player almost always walks RIGHT UP to that anchor, ending up far too close
-  // to read the panel — the cards and buttons at the bottom fall off the screen.
+  // to read the panel, so the cards and buttons at the bottom fall off the screen.
   // presentPanel snaps a panel to a comfortable distance directly in front of
   // the player, sized from the panel's real bounds and the live camera so the
   // WHOLE panel fits in view, then turns it to face the player. It is called
@@ -1311,7 +1320,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     applyPanelOnTop(entity);
   }
 
-  // Draw a panel OVER the 3D world so Gus, his cart, or a building can never sit
+  // Draw a panel OVER the 3D world so Fox or a building can never sit
   // in front of it and hide the cards. The player walks right up to these spots,
   // so a readable (far enough) panel often lands at or behind the thing it
   // belongs to; turning off depth testing and lifting the render order keeps the
@@ -1347,8 +1356,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
   // Every story panel, watched by one loop that re-applies applyPanelOnTop to
   // whichever is visible. UIKit creates text/glyph meshes lazily and only after
-  // a panel's content is set, so a one-time pass misses them — a panel placed
-  // behind Gus or a building would then show its boxes but hide its words. This
+  // a panel's content is set, so a one-time pass misses them. A panel placed
+  // behind Fox or a building would then show its boxes but hide its words. This
   // keeps the WHOLE visible panel on top, frame after frame.
   const storyPanels: any[] = [];
   setInterval(function () {

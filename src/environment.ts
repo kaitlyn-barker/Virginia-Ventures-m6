@@ -1,9 +1,11 @@
 // ============================================================================
-// environment.ts  —  the shop interior for Boss for a Day
-// Built from simple shapes in the Market Harvest style: a few mesh helpers, a
-// gradient sky, soft daylight, and a stage-look retint so the light shifts from
-// morning toward golden as the day advances. The player stands inside a shop:
-// a wood floor, three walls, and a glass storefront looking out onto the street.
+// environment.ts  —  shared world + visual helpers for Virginia Today (Module 6)
+// Built from simple shapes: the mesh primitives (meshBox/Cyl/Sphere/Cone), the
+// canvas card helpers (title/text/button/choice/info/goal/readout/report/speech
+// bubble) that render in-headset, and buildBaseWorld (a gradient sky, soft
+// daylight, a floor, and a boundary reused as the standing space and locomotion
+// bounds). Some Module 8 shop-interior builders remain here uncalled and inert,
+// pending a focused sweep; nothing in the live Module 6 flow references them.
 // No 3D model files are needed; real models can be swapped in later.
 // ============================================================================
 

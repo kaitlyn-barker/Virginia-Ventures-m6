@@ -1,6 +1,7 @@
 // ============================================================================
-// sfx.ts  —  synthesized sound effects for Money Moves (no audio files needed)
-// Tiny WebAudio jingles, the same approach as Market Harvest. They need no
+// sfx.ts  —  synthesized sound effects for Virginia Today (no audio files needed)
+// Tiny WebAudio jingles plus the per-stop ambient beds (server hum, village
+// murmur, farm breeze, harbor water/gulls). They need no
 // files and keep playing inside a WebXR session. The AudioContext can only
 // start after the first interaction, so we create it lazily on the first play.
 // ============================================================================
