@@ -192,6 +192,10 @@ export const ONBOARD_LINES = {
     "Ahead of you are four places in Virginia to explore. Visit all four, and you will earn your Explorer Report at the end.",
   ],
   rest: "That is everything. Point at any place to start exploring. Have fun!",
+  // Shown when saved progress is found on load (Phase 4.1 resume prompt).
+  resume: "Welcome back, explorer! Want to pick up your Virginia tour where you left off?",
+  resumeTitle: "Welcome back!",
+  resumeBody: "You have a Virginia tour in progress. Keep going, or start over?",
 };
 
 // ============================================================================

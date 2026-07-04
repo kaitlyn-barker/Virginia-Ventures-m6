@@ -774,7 +774,47 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const stop = STOPS.find(function (s) { return s.id === stopId; });
     if (stop) stop.done = true;          // lights the gold check, stops the invite glow
     recomputeM6Totals();
+    saveProgress();                      // persist so a headset sleep / refresh never wipes the tour
     console.log("[M6] finished " + stopId + " with award", award, "=> totals", m6Totals);
+  }
+
+  // PROGRESS PERSISTENCE (Phase 4.1). A 30-minute classroom session must survive a
+  // headset sleep, a crash, or an accidental refresh, so the per-stop awards live in
+  // localStorage. That is all we need: the done flags and m6Totals are derived from
+  // it. Everything is wrapped in try/catch, because private-mode or a full quota must
+  // never break the experience (it just will not persist). ?fresh=1 forces a clean
+  // start for the next class.
+  const SAVE_KEY = "virginiaVenturesM6.progress.v1";
+  function saveProgress() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, awards: M6_AWARDS })); }
+    catch (e) { /* storage unavailable: the tour simply will not persist */ }
+  }
+  function clearProgress() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+  }
+  function loadSavedAwards(): Record<string, { economic: number; innovation: number; problem: number }> | null {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || data.v !== 1 || !data.awards || typeof data.awards !== "object") return null;
+      const out: Record<string, { economic: number; innovation: number; problem: number }> = {};
+      for (const id of STOPS.map(function (s) { return s.id; })) {   // only trust known stop ids
+        const a = data.awards[id];
+        if (a && typeof a.economic === "number" && typeof a.innovation === "number" && typeof a.problem === "number") {
+          out[id] = { economic: a.economic, innovation: a.innovation, problem: a.problem };
+        }
+      }
+      return Object.keys(out).length ? out : null;
+    } catch (e) { return null; }
+  }
+  function restoreProgress(awards: Record<string, { economic: number; innovation: number; problem: number }>) {
+    for (const id in awards) {
+      M6_AWARDS[id] = awards[id];
+      const stop = STOPS.find(function (s) { return s.id === id; });
+      if (stop) stop.done = true;        // its gold check lights on the restored map
+    }
+    recomputeM6Totals();
   }
 
   // The current stop's IN-PROGRESS contribution to the three meters, updated live as
@@ -4219,15 +4259,45 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
   const obStartBtn = makeOnboardButton("Start", ONBOARD.ADVANCE_POS, ONBOARD.ADVANCE_W, ONBOARD.ADVANCE_H);
   const obNextBtn = makeOnboardButton("Next", ONBOARD.ADVANCE_POS, ONBOARD.ADVANCE_W, ONBOARD.ADVANCE_H);
   const obSkipBtn = makeOnboardButton("Skip intro", ONBOARD.SKIP_POS, ONBOARD.SKIP_W, ONBOARD.SKIP_H);
+  // Resume prompt (Phase 4.1): shown INSTEAD of the goal card when saved progress
+  // exists. Continue restores the map with its stamps; Start Over wipes the save and
+  // runs the normal onboarding. Reuses the goal-card spot and the two button spots.
+  const obContinueBtn = makeOnboardButton("Continue", ONBOARD.ADVANCE_POS, ONBOARD.ADVANCE_W, ONBOARD.ADVANCE_H);
+  const obStartOverBtn = makeOnboardButton("Start over", ONBOARD.SKIP_POS, ONBOARD.SKIP_W, ONBOARD.SKIP_H);
+  const resumeCard = makeTextPanel(ONBOARD_LINES.resumeTitle, ONBOARD_LINES.resumeBody, ONBOARD.GOAL_W);
+  resumeCard.position.set(ONBOARD.GOAL_POS[0], ONBOARD.GOAL_POS[1], ONBOARD.GOAL_POS[2]);
+  (resumeCard.material as any).depthTest = false;
+  (resumeCard.material as any).depthWrite = false;
+  resumeCard.renderOrder = 49000;
+  resumeCard.visible = false;
+  scene.add(resumeCard);
 
   // ---- The onboarding state machine ----
   // "goal" | 1..4 | "done". showStep paints one beat; finishOnboarding opens the
   // gate; startOnboarding shows the goal card. Only ever moves forward.
-  let onboardStep: "goal" | number | "done" = "goal";
+  let onboardStep: "resume" | "goal" | number | "done" = "goal";
+  let savedAwardsToRestore: Record<string, { economic: number; innovation: number; problem: number }> | null = null;
+
+  // Show the resume prompt: the map is still locked, the goal card hidden, and only
+  // Continue / Start Over are live. Fox invites the student to pick up where they left off.
+  function showResume() {
+    onboardStep = "resume";
+    goalCard.visible = false;
+    resumeCard.visible = true;
+    obStartBtn.mesh.visible = false;
+    obNextBtn.mesh.visible = false;
+    obSkipBtn.mesh.visible = false;
+    obContinueBtn.mesh.visible = true;
+    obStartOverBtn.mesh.visible = true;
+    setFoxLine(ONBOARD_LINES.resume);
+  }
 
   function showStep(s: "goal" | number) {
     onboardStep = s;
     const isGoal = s === "goal";
+    resumeCard.visible = false;              // leave the resume prompt behind
+    obContinueBtn.mesh.visible = false;
+    obStartOverBtn.mesh.visible = false;
     goalCard.visible = isGoal;
     if (!isGoal) setFoxLine(ONBOARD_LINES.tut[(s as number) - 1]); // lines 1..4
     // Advance button: "Start" on the goal card; "Next" on lines 1, 3, 4. Line 2 is
@@ -4253,10 +4323,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // Park every onboarding button far out of the ray path (hiding alone is not
     // enough: a hidden Interactable still raycasts, and these sit in front of the
     // now-explorable row). The Fox practice target goes with them.
-    for (const b of [obStartBtn, obNextBtn, obSkipBtn]) {
+    for (const b of [obStartBtn, obNextBtn, obSkipBtn, obContinueBtn, obStartOverBtn]) {
       b.mesh.visible = false;
       b.mesh.position.set(0, -1000, 0);
     }
+    resumeCard.visible = false;
     foxHitMesh.position.set(0, -1000, 0);
     setFoxLine(ONBOARD_LINES.rest);         // Fox rests on the calm "point at any place" line
     currentView = "hub";                    // OPEN THE GATE: the map is now explorable
@@ -4312,11 +4383,24 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       else if (onboardStep === 3) showStep(4);
       else finishOnboarding();              // after line 4
     });
-    // Skip -> straight to the open hub. Always live here (we already returned if
-    // "done"), so the student can leave the goal card or any line at once.
-    serviceOnboardButton(obSkipBtn, true, function () {
+    // Skip -> straight to the open hub. Live on the goal card and every tutorial line,
+    // but NOT on the resume prompt (there the choice is Continue / Start Over).
+    serviceOnboardButton(obSkipBtn, onboardStep !== "resume", function () {
       sfxClick();
       finishOnboarding();
+    });
+    // Resume prompt: Continue restores the saved map, Start Over wipes it and runs the
+    // normal onboarding. Both are inert unless the resume prompt is up.
+    serviceOnboardButton(obContinueBtn, onboardStep === "resume", function () {
+      sfxChime();
+      if (savedAwardsToRestore) restoreProgress(savedAwardsToRestore);
+      finishOnboarding();                    // opens the map with its gold checks + filled meters
+    });
+    serviceOnboardButton(obStartOverBtn, onboardStep === "resume", function () {
+      sfxClick();
+      clearProgress();
+      savedAwardsToRestore = null;
+      showStep("goal");                      // fresh tour from the top
     });
 
     // The practice tap (line 2): Fox grows while pointed at, and a fresh press on
@@ -4336,9 +4420,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     }
   }, ONBOARD.TICK_MS);
 
-  // Kick off the opening: show the goal card. Everything else is parked hidden
-  // until its step, and currentView is already "intro", so the map stays locked.
-  startOnboarding();
+  // Kick off the opening. currentView is already "intro", so the map stays locked.
+  // A teacher can force a clean slate for the next class with ?fresh=1. Otherwise, if
+  // a tour is saved, offer to resume it; if not, run the normal onboarding.
+  let wantsFresh = false;
+  try { wantsFresh = new URLSearchParams(location.search).get("fresh") === "1"; } catch (e) { /* ignore */ }
+  if (wantsFresh) clearProgress();
+  savedAwardsToRestore = wantsFresh ? null : loadSavedAwards();
+  if (savedAwardsToRestore) showResume();
+  else startOnboarding();
 
   // ======================================================================
   // EXPLORER REPORT  —  the finish of the Virginia tour. Once the student has
