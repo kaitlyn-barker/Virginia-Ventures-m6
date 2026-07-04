@@ -196,6 +196,20 @@ export const ONBOARD_LINES = {
   resume: "Welcome back, explorer! Want to pick up your Virginia tour where you left off?",
   resumeTitle: "Welcome back!",
   resumeBody: "You have a Virginia tour in progress. Keep going, or start over?",
+  // Fox's line when a student returns to the map after finishing a stop (Phase 5.1),
+  // keyed by stop id, plus a "how many left" tail indexed by stops remaining (0..3).
+  back: {
+    tech: "Nice work at the Tech Office!",
+    port: "Great loading at the Port of Virginia!",
+    tourism: "Well done at Colonial Williamsburg!",
+    farm: "Great work on the Modern Farm!",
+  } as { [id: string]: string },
+  backLeft: [
+    "You explored all four places. Time for your Explorer Report!",
+    "One more place to explore.",
+    "Two more places to explore.",
+    "Three more places to explore.",
+  ],
 };
 
 // ============================================================================
@@ -1057,6 +1071,11 @@ export const PORT = {
   // centre hint so the two never overlap. (It draws on top, like the other port cards.)
   DEBUG_POS: [-1.5, 2.45, 4.9] as [number, number, number],
   DEBUG_W: 1.15, DEBUG_H: 0.92,
+  // A compact "Loaded: N" counter right by the belt (Phase 5.2), so the running effort
+  // is visible where the student is looking, not only in the upper-left manifest. Sits
+  // just above the containers and below the centre hint so the three never overlap.
+  LOADED_POS: [0, 1.58, 5.62] as [number, number, number],
+  LOADED_W: 0.86, LOADED_H: 0.26,
   // ---- SCORING: correct loads -> the three meters ----  The Port LEANS ON Economic
   // Impact (the other three stops lean on Innovation and Problem Solving). Every
   // container dropped on its MATCHING ship adds these; a wrong tap never subtracts, it

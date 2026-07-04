@@ -1022,8 +1022,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     sfxClick();
     // The runner's REAL tally if this stop produced one this visit; otherwise the
     // placeholder (for stops whose challenge is not built yet).
-    completeStop(activeStopId, pendingAward || VISIT.PLACEHOLDER_AWARD);
+    const doneId = activeStopId;
+    completeStop(doneId, pendingAward || VISIT.PLACEHOLDER_AWARD);
     pendingAward = null;
+    // Fox greets the return with a per-stop line + how many places are left (Phase 5.1).
+    // Skip it once all four are done, so his "check your report" line is not overwritten
+    // by the report's own replay nudge when the See-report banner opens on the same map.
+    const remaining = STOPS.filter(function (s) { return !s.done; }).length;
+    const backLine = ONBOARD_LINES.back[doneId];
+    if (backLine && remaining > 0) setFoxLine(backLine + " " + ONBOARD_LINES.backLeft[remaining]);
     currentView = "fading";
     startFade(
       function onCover() { hideStop(); showHub(); activeStopId = null; },
@@ -3291,6 +3298,42 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     hintMesh.visible = false;
     group.add(hintMesh);
     let hintState = "";
+
+    // (2b) THE LOADED COUNTER (Phase 5.2): a small gold pill by the belt showing how many
+    // containers have been shipped correctly so far, so effort is visible before FINISH.
+    // Its own canvas, redrawn only when the count changes (no flashing). Shown with the
+    // hint during play, hidden with it at the round end / on leaving.
+    const loadedCanvas = document.createElement("canvas");
+    loadedCanvas.width = 512; loadedCanvas.height = 150;
+    const lcx = loadedCanvas.getContext("2d") as CanvasRenderingContext2D;
+    const loadedTex = new CanvasTexture(loadedCanvas);
+    loadedTex.colorSpace = SRGBColorSpace;
+    const loadedMesh = new Mesh(
+      new PlaneGeometry(PORT.LOADED_W, PORT.LOADED_H),
+      new MeshBasicMaterial({ map: loadedTex, transparent: true, side: DoubleSide }),
+    );
+    onTop(loadedMesh);
+    loadedMesh.position.set(PORT.LOADED_POS[0], PORT.LOADED_POS[1], PORT.LOADED_POS[2]);
+    loadedMesh.visible = false;
+    group.add(loadedMesh);
+    let loadedShown = -1;
+    function drawLoaded(n: number) {
+      if (n === loadedShown) return;              // only redraw when the count changes
+      loadedShown = n;
+      const W = 512, Hh = 150;
+      lcx.clearRect(0, 0, W, Hh);
+      lcx.fillStyle = "rgba(202,162,74,0.96)";    // a warm gold pill
+      if ((lcx as any).roundRect) { lcx.beginPath(); (lcx as any).roundRect(10, 10, W - 20, Hh - 20, 40); lcx.fill(); }
+      else lcx.fillRect(10, 10, W - 20, Hh - 20);
+      lcx.fillStyle = "#1F3A5F";
+      lcx.textAlign = "center";
+      lcx.textBaseline = "middle";
+      lcx.font = "bold 66px sans-serif";
+      lcx.fillText("Loaded: " + n, W / 2, Hh / 2 + 2);
+      loadedTex.needsUpdate = true;
+    }
+    function loadedTotal() { return (counts.europe || 0) + (counts.asia || 0) + (counts.usa || 0); }
+
     function drawHint(text: string) {
       const W = 1024, Hh = 192;
       hctx.clearRect(0, 0, W, Hh);
@@ -3383,6 +3426,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       startBtnMesh.scale.setScalar(1);
       startWasPressed = !!startBtn.hasComponent(Pressed); // never fire on a carried-over press
       hintMesh.visible = false;
+      loadedMesh.visible = false;
       hintState = "";
     }
     function beginPlay() {                    // Start tapped: clear the intro, bring up the hint
@@ -3395,6 +3439,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       portFinishWasPressed = !!portFinishBtn.hasComponent(Pressed); // never fire on a carried-over press
       hintMesh.visible = true;
       hintState = "pick"; drawHint("Tap a product to pick it up");
+      loadedMesh.visible = true; drawLoaded(0);   // the running "Loaded: N" counter starts at zero
       sfxClick();
     }
 
@@ -3428,6 +3473,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       if (selectedCont) deselectCont(selectedCont); // drop any lifted container so the count is final
       portFinishMesh.visible = false;
       hintMesh.visible = false;
+      loadedMesh.visible = false;            // the result card shows the final count from here
       clearFact();                           // tidy any mid-fade why-fact so it never sits over the result
       panelMesh.visible = false;             // hide the live SHIPPED manifest; the result's gains replace it
       const a = computeAward();
@@ -3572,6 +3618,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         counts[ct.key] = (counts[ct.key] || 0) + 1;
         sh.pulse = 1;                      // the ship glows gold, eased down in tick
         drawCounts();
+        drawLoaded(loadedTotal());         // bump the by-the-belt "Loaded: N" counter
         const pa = computeAward();         // feed the in-stop meter so its bars grow with each load
         stopPreview.economic = pa.ei; stopPreview.innovation = pa.it; stopPreview.problem = pa.ps;
         showFact(ct.product);              // the teaching layer: a brief why-fact for this product
@@ -3838,7 +3885,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       }
       portStarted = false; startWasPressed = false; // tidy the directions so nothing leaks to the hub
       ended = false; portFinishWasPressed = false; returnWasPressed = false;
-      introPanel.visible = false; startBtnMesh.visible = false; hintMesh.visible = false;
+      introPanel.visible = false; startBtnMesh.visible = false; hintMesh.visible = false; loadedMesh.visible = false;
       portFinishMesh.visible = false; returnMesh.visible = false; // park FINISH + RETURN so nothing leaks to the hub
       endToken++;                                // cancel any pending delayed result reveal
       if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
