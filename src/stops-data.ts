@@ -937,6 +937,11 @@ export const PORT = {
     { name: "Chicken",  market: "usa",    color: "#3fa64a", icon: "chicken" },  // green, stays in the USA
     { name: "Seafood",  market: "usa",    color: "#3fa64a", icon: "fish" },     // green, stays in the USA
   ] as { name: string; market: string; color: string; icon: string }[],
+  // ---- COLORBLIND BACKUP (Phase 4.3): a distinct SHAPE per market, drawn on both the
+  // ship's flag and every container face bound for it. Red-green color blindness is
+  // common, and color is the pre-reader's backup match channel, so a shape gives a
+  // second, color-independent way to match a container to its ship. Keyed by market.
+  MARKET_SHAPE: { europe: "star", asia: "circle", usa: "stripe" } as { [market: string]: string },
   // ---- the teaching layer: a one-line WHY-FACT shown briefly on each CORRECT load, so the
   // student learns from the trade, not just sorts it. Keyed by product name; fifth-grade
   // voice, one short sentence each. Shown on the calm fact card (FACT_* below), then faded.

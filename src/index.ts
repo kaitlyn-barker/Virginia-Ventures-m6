@@ -2776,10 +2776,40 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     ctx.restore();
   }
 
+  // The COLORBLIND market shape (Phase 4.3): a star (Europe), circle (Asia), or stripe
+  // (USA), drawn in `fill` and centered at cx,cy within radius r. The SAME shape marks
+  // a container face and its target ship's flag, so a student can match by shape even
+  // if the red/blue/green colors look alike to them.
+  function drawMarketShape(ctx: CanvasRenderingContext2D, shape: string, cx: number, cy: number, r: number, fill: string) {
+    ctx.save();
+    ctx.fillStyle = fill;
+    if (shape === "circle") {
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    } else if (shape === "stripe") {
+      // three bold horizontal bars (reads as a distinct pattern, not a solid block)
+      const bw = r * 2, bh = r * 0.42, gap = r * 0.28;
+      for (let i = -1; i <= 1; i++) {
+        const y = cy + i * (bh + gap);
+        if ((ctx as any).roundRect) { ctx.beginPath(); (ctx as any).roundRect(cx - bw / 2, y - bh / 2, bw, bh, bh / 2); ctx.fill(); }
+        else ctx.fillRect(cx - bw / 2, y - bh / 2, bw, bh);
+      }
+    } else { // "star": a five-point star
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const ang = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rad = i % 2 === 0 ? r : r * 0.42;
+        const x = cx + Math.cos(ang) * rad, y = cy + Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // The product face for a container: the market's backup color fills the cube (so it
   // still reads red / blue / green at a glance), with a white product icon in the color
   // field and the product name on a cream strip below. Painted once per product, reused.
-  function productFaceTexture(p: { name: string; color: string; icon: string }): CanvasTexture {
+  function productFaceTexture(p: { name: string; color: string; icon: string; market: string }): CanvasTexture {
     const S = 256;
     const c = document.createElement("canvas");
     c.width = S; c.height = S;
@@ -2790,6 +2820,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     ctx.lineWidth = 12;
     ctx.strokeRect(6, 6, S - 12, S - 12);
     drawProductIcon(ctx, p.icon, S / 2, 86, 44, "#ffffff", p.color);
+    // The COLORBLIND market badge (Phase 4.3): a dark rounded chip in the top-left with
+    // the market's white shape, matching the shape on this market's ship flag.
+    const shape = PORT.MARKET_SHAPE[p.market];
+    if (shape) {
+      ctx.fillStyle = "rgba(20,37,60,0.6)";
+      if ((ctx as any).roundRect) { ctx.beginPath(); (ctx as any).roundRect(14, 14, 66, 66, 16); ctx.fill(); }
+      else ctx.fillRect(14, 14, 66, 66);
+      drawMarketShape(ctx, shape, 47, 47, 22, "#ffffff");
+    }
     ctx.fillStyle = "#fbf3dd";                // a cream name strip across the lower third
     const sy = 158, sh = 78;
     if ((ctx as any).roundRect) { ctx.beginPath(); (ctx as any).roundRect(18, sy, S - 36, sh, 14); ctx.fill(); }
@@ -2943,8 +2982,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const mast = meshCyl(0.025, 0.025, 0.7, "#6d5636");
     mast.position.set(0, PORT.DECK_Y + 0.5, PORT.SHIP_HULL_D * 0.32);
     g.add(mast);
-    const flag = meshBox(0.32, 0.2, 0.02, ship.color);
-    flag.position.set(0.18, PORT.DECK_Y + 0.72, PORT.SHIP_HULL_D * 0.32);
+    // The flag carries the market color AND its colorblind shape (Phase 4.3), so it
+    // matches the shape badge on every container bound for this ship.
+    const flagShape = PORT.MARKET_SHAPE[ship.key];
+    const flagC = document.createElement("canvas"); flagC.width = 128; flagC.height = 84;
+    const flagCtx = flagC.getContext("2d") as CanvasRenderingContext2D;
+    flagCtx.fillStyle = ship.color; flagCtx.fillRect(0, 0, 128, 84);
+    if (flagShape) drawMarketShape(flagCtx, flagShape, 64, 42, 27, "#ffffff");
+    const flagTex = new CanvasTexture(flagC); flagTex.colorSpace = SRGBColorSpace;
+    const flag = new Mesh(new PlaneGeometry(0.36, 0.24), new MeshBasicMaterial({ map: flagTex, side: DoubleSide }));
+    flag.position.set(0.2, PORT.DECK_Y + 0.72, PORT.SHIP_HULL_D * 0.32);
     g.add(flag);
     const sign = portSign(ship.label, ship.color);
     sign.position.set(0, PORT.DECK_Y + 0.5, 0.02);
