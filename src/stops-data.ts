@@ -483,6 +483,19 @@ export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
 };
 
 // ============================================================================
+// THEN AND NOW  (the module's history through-line, "The Great Shift").
+// One short then-vs-now fact per stop, shown on a shared card when the stop
+// finishes, right before its Finish button. Two sentences each, fifth-grade
+// voice, no em dashes. Keep them short so they fit the finish card.
+// ============================================================================
+export const THEN_NOW: { [stopId: string]: string } = {
+  tech: "Long ago this land was farm fields. Today it is home to the internet, in giant data centers full of humming computers.",
+  port: "Long ago, colonists shipped tobacco to England from these same waters. Today the Port of Virginia ships goods all around the world.",
+  tourism: "Long ago, Williamsburg was Virginia's busy capital. Today its history is the main attraction, and sharing that story is the business.",
+  farm: "Long ago, farmers planted and watered by hand and by guess. Today GPS tractors and sensor drones help them grow more and waste less.",
+};
+
+// ============================================================================
 // STOP STAGING — TUNING  (how the build reacts to each pick; shared by all stops)
 // One labeled block for every blink, glow, and flow rate, so the comfort rules
 // (slow, gentle, never strobing) are tuned in ONE place. The generic staging
@@ -1089,6 +1102,10 @@ export const PORT = {
   FACT_IN_MS: 240,            // gentle fade IN (never a pop)
   FACT_HOLD_MS: 2600,         // held fully visible, long enough to read one line
   FACT_OUT_MS: 760,           // gentle fade OUT, so it clears itself without a tap
+  // The THEN AND NOW finish card: shown centered at comfortable reading height BEFORE
+  // the result (the finish area is too busy to show both at once), then it steps aside.
+  THEN_NOW_POS: [0, 1.95, 3.3] as [number, number, number], THEN_NOW_W: 2.0,
+  THEN_NOW_HOLD_MS: 3200,     // long enough to read two sentences before the result appears
 };
 
 // ============================================================================

@@ -369,6 +369,54 @@ export function makeTextPanel(title: string, body: string, widthMeters = 1.7): M
   );
 }
 
+// A short "Then and Now" card for a stop's finish: a warm parchment card with a
+// gold THEN AND NOW eyebrow and the then-vs-now fact wrapped beneath it. Shorter
+// than makeTextPanel on purpose (300px canvas), so it sits above a result card or
+// in a runner panel slot without a tall band of blank parchment. Font auto-shrinks
+// to keep the fact on at most three comfortable lines.
+export function makeThenNowCard(text: string, widthMeters = 1.9): Mesh {
+  const W = 1024, H = 300;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+
+  ctx.fillStyle = "#fbf3dd";
+  tracePanel(ctx, 12, 12, W - 24, H - 24, 34);
+  ctx.fill();
+  ctx.lineWidth = 10; ctx.strokeStyle = "#caa24a";
+  tracePanel(ctx, 12, 12, W - 24, H - 24, 34);
+  ctx.stroke();
+
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#8a6118";
+  ctx.font = "bold 34px sans-serif";
+  ctx.fillText("THEN AND NOW", W / 2, 56);
+
+  ctx.fillStyle = "#1F3A5F";
+  let size = 44, lines: string[] = [];
+  do {
+    ctx.font = "bold " + size + "px sans-serif";
+    lines = []; let line = "";
+    for (const w of text.split(" ")) {
+      const t = line ? line + " " + w : w;
+      if (ctx.measureText(t).width > W - 120 && line) { lines.push(line); line = w; }
+      else line = t;
+    }
+    if (line) lines.push(line);
+    size -= 3;
+  } while (lines.length > 3 && size > 26);
+  const lh = 54, startY = 168 - ((lines.length - 1) * lh) / 2;
+  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W / 2, startY + i * lh);
+
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  const heightMeters = (widthMeters * H) / W;
+  return new Mesh(
+    new PlaneGeometry(widthMeters, heightMeters),
+    new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }),
+  );
+}
+
 // A compact hub TITLE card that hugs three short lines: a bold place name, a
 // smaller region line, and a smaller flavor tagline. The canvas is short on
 // purpose, so there is no tall band of blank sky under the words. All four hub

@@ -47,7 +47,7 @@ import {
 } from "@iwsdk/core";
 
 import { buildBaseWorld } from "./environment";
-import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard, makeExplorerReportCard, makeGoalCard, makeHighlightFrame } from "./environment";
+import { meshBox, meshCyl, meshSphere, meshCone, makeTitleCard, makeSpeechBubble, makeTextPanel, makeButtonCard, makeChoiceCard, makeInfoCard, makeReadoutCard, makeExplorerReportCard, makeGoalCard, makeHighlightFrame, makeThenNowCard } from "./environment";
 import { sfxStage, sfxClick, sfxFanfare, sfxChime, sfxShipHorn, startHum, stopHum, startVillageAmbience, stopVillageAmbience, startFarmAmbience, stopFarmAmbience, startPortAmbience, stopPortAmbience } from "./sfx";
 
 // Tunable data + copy (HUB, STOPS, DECISION_PACKS, per-stop staging, PORT,
@@ -55,7 +55,7 @@ import { sfxStage, sfxClick, sfxFanfare, sfxChime, sfxShipHorn, startHum, stopHu
 import {
   HUB, LANDMARK, HUB_COLOR, STOPS, ONBOARD, ONBOARD_LINES,
   DECISION_PACKS, STAGING, TECH_BUILD, TECH_ROOM, TOURISM_BUILD, TOURISM_VILLAGE,
-  FARM_BUILD, FARM_VALLEY, PORT, REPORT,
+  FARM_BUILD, FARM_VALLEY, PORT, REPORT, THEN_NOW,
   type MeterEffects, type StageReaction, type DecisionOption, type Decision, type DecisionPack,
 } from "./stops-data";
 
@@ -3115,6 +3115,8 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     let portStarted = false;                 // false while the intro is up; true once Start is tapped
     let ended = false;                        // true once the round is over and the result is up
     let resultMesh: any = null;               // the result readout card (rebuilt each round-end)
+    let portThenNow: any = null;              // the THEN AND NOW card, shown before the result at round-end
+    let endToken = 0;                         // bumped each round-end / on leaving, to guard the delayed result reveal
     function onTop(mesh: any) {               // always readable, never depth-clipped by sky/ships
       (mesh.material as any).depthTest = false;
       (mesh.material as any).depthWrite = false;
@@ -3334,21 +3336,38 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         { label: "Innovation Thinking", delta: a.it },
         { label: "Problem Solving", delta: a.ps },
       ];
-      if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
-      // The why-framing (PORT.RESULT_WHY) rides UNDER the gains as a calm sub-note, so the
-      // result explains WHY each meter grew, not just by how much.
-      resultMesh = makeReadoutCard(changes, note, { widthMeters: PORT.RESULT_W, subNote: PORT.RESULT_WHY });
-      onTop(resultMesh);
-      resultMesh.position.set(PORT.RESULT_POS[0], PORT.RESULT_POS[1], PORT.RESULT_POS[2]);
-      group.add(resultMesh);
-      // Hand the REAL totals to the shell and bring up the RETURN button on the result. A
-      // fresh press on RETURN (handled in tick) runs the shell's finishStop -> completeStop(
-      // "port", pendingAward) -> the gold check lights and the hub meters get the real Port
-      // contribution, then it fades back to the map.
+      // Hand the REAL totals to the shell now; the Return press (handled in tick)
+      // runs finishStop -> completeStop("port", pendingAward).
       pendingAward = { economic: a.ei, innovation: a.it, problem: a.ps };
-      returnMesh.visible = true;
-      returnMesh.scale.setScalar(1);
-      returnWasPressed = !!returnBtn.hasComponent(Pressed); // showing it must not fire on a carried press
+      // TWO beats, because the Port finish area is too busy to show both cards at once:
+      // first the THEN AND NOW history card, centered; then, after a hold, the result
+      // gains and the Return button. The then-now steps aside when the result appears.
+      if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
+      if (portThenNow) { group.remove(portThenNow); portThenNow = null; }
+      returnMesh.visible = false;
+      if (THEN_NOW.port) {
+        portThenNow = makeThenNowCard(THEN_NOW.port, PORT.THEN_NOW_W);
+        onTop(portThenNow);
+        portThenNow.position.set(PORT.THEN_NOW_POS[0], PORT.THEN_NOW_POS[1], PORT.THEN_NOW_POS[2]);
+        group.add(portThenNow);
+      }
+      const token = ++endToken;
+      const showResult = function () {
+        if (!ended || token !== endToken) return; // the round was reset or left during the hold
+        if (portThenNow) { group.remove(portThenNow); portThenNow = null; }
+        // The why-framing (PORT.RESULT_WHY) rides UNDER the gains as a calm sub-note, so the
+        // result explains WHY each meter grew, not just by how much.
+        resultMesh = makeReadoutCard(changes, note, { widthMeters: PORT.RESULT_W, subNote: PORT.RESULT_WHY });
+        onTop(resultMesh);
+        resultMesh.position.set(PORT.RESULT_POS[0], PORT.RESULT_POS[1], PORT.RESULT_POS[2]);
+        group.add(resultMesh);
+        returnMesh.visible = true;
+        returnMesh.scale.setScalar(1);
+        returnWasPressed = !!returnBtn.hasComponent(Pressed); // showing it must not fire on a carried press
+      };
+      // setTimeout (not rAF) is safe in the headset; the token guards a leave mid-hold.
+      if (THEN_NOW.port) setTimeout(showResult, PORT.THEN_NOW_HOLD_MS);
+      else showResult();
       console.log("[PORT] round end => award", pendingAward, "from", { ...counts }, "allShips", a.allShips);
     }
 
@@ -3676,6 +3695,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       portFinishMesh.visible = false;            // FINISH appears only once play starts (beginPlay)
       returnMesh.visible = false;                // RETURN appears only with the result (endRound)
       if (resultMesh) { group.remove(resultMesh); resultMesh = null; } // clear any prior round's result
+      if (portThenNow) { group.remove(portThenNow); portThenNow = null; } // and its then-now card
       selectedCont = null; flyingCont = null; catchWasPressed = false;
       catchMesh.visible = true;                  // the empty-water deselect catcher is live in the port
       for (let i = 0; i < ships.length; i++) {
@@ -3711,7 +3731,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       ended = false; portFinishWasPressed = false; returnWasPressed = false;
       introPanel.visible = false; startBtnMesh.visible = false; hintMesh.visible = false;
       portFinishMesh.visible = false; returnMesh.visible = false; // park FINISH + RETURN so nothing leaks to the hub
+      endToken++;                                // cancel any pending delayed result reveal
       if (resultMesh) { group.remove(resultMesh); resultMesh = null; }
+      if (portThenNow) { group.remove(portThenNow); portThenNow = null; }
     }
 
     // The game's own loop: bob, eases, refill timers, and release detection. Gated so
@@ -3904,11 +3926,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     for (const c of choiceCards) disablePressable(c);
     disablePressable(startBtn);
     disablePressable(nextBtn);
-    // Generic wrap-up: the runner is shared by every decision stop, so the line
-    // must not name one stop's build (it used to say "data center", which read
-    // wrong at the Tourism Hub). The per-stop flavor lives in the setup + notes.
+    // Wrap-up = the stop's THEN AND NOW card (the module's history through-line):
+    // a short then-vs-now fact before the Finish button. The runner is shared by
+    // every decision stop, so the fact is looked up by stop id (a generic "All
+    // set!" line is the fallback if a stop has no then-now entry).
+    const thenNow = THEN_NOW[runnerStop.id];
     setRunnerPanel(
-      makeTextPanel("All set!", "You made all three choices. Press the button to return to the map.", RUNNER.INFO_W),
+      thenNow
+        ? makeThenNowCard(thenNow, RUNNER.INFO_W)
+        : makeTextPanel("All set!", "You made all three choices. Press the button to return to the map.", RUNNER.INFO_W),
       RUNNER.CLOSE_PANEL_POS,
     );
     // Hand the real totals to the shell; finishStop reads pendingAward.
