@@ -12,7 +12,8 @@
     "reference:warmup": "iwsdk reference warmup",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "audit:score": "esbuild scripts/audit-score.ts --bundle --platform=node --format=esm | node --input-type=module"
   },
   "dependencies": {
     "@iwsdk/core": "0.4.2",

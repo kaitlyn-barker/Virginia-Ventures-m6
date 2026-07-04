@@ -221,6 +221,22 @@ export type DecisionOption = { label: string; effects: MeterEffects; note: strin
 export type Decision = { question: string; options: DecisionOption[] };
 export type DecisionPack = { setup: string; decisions: Decision[] };
 
+// SCORE-TUNING TARGETS (checked by `npm run audit:score`, see scripts/audit-score.ts).
+// Totals accumulate across the four stops, 0..100 per meter; the report gives 3
+// stars at >= 60, 2 stars at >= 60/2, and the top "Virginia Economist" title at an
+// average >= 60. Current numbers, from the audit:
+//   - Decision stops, all strong picks: EI 51 / IN 51 / PS 64 (best possible here).
+//   - Port strong haul adds up to EI 36 / IN 18 / PS 24 (its caps). Economic Impact
+//     and Innovation lean on the Port to clear 60, so a perfect run needs a real
+//     Port haul (about 4+ correct loads covering all three ships).
+//   - INVARIANTS the audit enforces: a perfect run earns 3 stars on all three
+//     meters + the Economist title; a weak run still earns 1 star everywhere (no
+//     fail). Both hold today.
+//   - TARGET still pending: a typical (mixed) run should reach 2 stars on every
+//     meter. It does not yet, because each question below is binary (one strong
+//     option, two punishing ones). Phase 3.2 fixes this by making two of the three
+//     options defensible with different meter profiles; re-run the audit after.
+
 export const DECISION_PACKS: { [stopId: string]: DecisionPack } = {
   tech: {
     setup:
